@@ -29,21 +29,38 @@ const User = sequelize.define('User', {
     },
     phoneNumber: {
         type: DataTypes.STRING(20),
-        allowNull: false,
+        allowNull: true,
         unique: {
             msg: 'User with this phone number already exists'
         },
         validate: {
-            notNull: { msg: 'Please add a phone number' }
+            isLocal(value) {
+                if (this.authProvider === 'local' && !value) {
+                    throw new Error('Please add a phone number');
+                }
+            }
         }
     },
     password: {
         type: DataTypes.STRING,
-        allowNull: false,
+        allowNull: true,
         validate: {
-            notNull: { msg: 'Please add a password' },
+            isLocal(value) {
+                if (this.authProvider === 'local' && !value) {
+                    throw new Error('Please add a password');
+                }
+            },
             len: { args: [6, 100], msg: 'Password must be at least 6 characters' }
         }
+    },
+    authProvider: {
+        type: DataTypes.STRING,
+        defaultValue: 'local'
+    },
+    googleId: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        unique: true
     }
 }, {
     timestamps: true,

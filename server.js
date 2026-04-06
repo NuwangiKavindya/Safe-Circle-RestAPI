@@ -1,14 +1,15 @@
 const express = require('express');
 const dotenv = require('dotenv');
+
+// Load env vars
+dotenv.config();
+
 const cors = require('cors');
 const { connectDB, sequelize } = require('./config/db');
 const swaggerUI = require('swagger-ui-express');
 const swaggerJsDoc = require('swagger-jsdoc');
 const authRoutes = require('./routes/authRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
-
-// Load env vars
-dotenv.config();
 
 // Connect to database
 connectDB();
@@ -110,6 +111,52 @@ app.use('/api-docs', swaggerUI.serve, swaggerUI.setup(specs));
  *         description: Validation error or missing fields
  *       500:
  *         description: Server error
+ */
+/**
+ * @swagger
+ * /api/auth/google:
+ *   post:
+ *     summary: Authenticate a user via Google SSO
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - idToken
+ *             properties:
+ *               idToken:
+ *                 type: string
+ *                 description: The Google ID token received from the client
+ *     responses:
+ *       200:
+ *         description: User authenticated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 token:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     fullName:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     phoneNumber:
+ *                       type: string
+ *       400:
+ *         description: Missing idToken
+ *       401:
+ *         description: Invalid Google ID token
  */
 app.use('/api/auth', authRoutes);
 

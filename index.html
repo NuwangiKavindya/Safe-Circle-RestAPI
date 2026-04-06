@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google SSO Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background-color: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+
+        #buttonDiv {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .output-box {
+            margin-top: 20px;
+            text-align: left;
+            display: none;
+            /* Hidden until login */
+        }
+
+        .output-box h3 {
+            font-size: 16px;
+            color: #555;
+            margin-bottom: 8px;
+        }
+
+        pre {
+            background-color: #282c34;
+            color: #abb2bf;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 13px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <h1>Sign In to Get ID Token</h1>
+
+        <div id="buttonDiv"></div>
+
+        <div class="output-box" id="outputBox">
+            <h3>Your ID Token:</h3>
+            <pre id="tokenDisplay">Waiting for login...</pre>
+        </div>
+    </div>
+
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <script>
+        // Replace this with your actual Client ID from Google Cloud Console
+        const GOOGLE_CLIENT_ID = "342423658982-dkt3lat80cve8m7kgg92tl4b13iioqtn.apps.googleusercontent.com";
+
+        // This function runs when the user successfully logs in
+        function handleCredentialResponse(response) {
+            console.log("Full Google Response:", response);
+
+            // Extract the id_token
+            const idToken = response.credential;
+
+            // Display the token on the screen
+            const outputBox = document.getElementById('outputBox');
+            const tokenDisplay = document.getElementById('tokenDisplay');
+
+            outputBox.style.display = 'block';
+            tokenDisplay.textContent = idToken;
+
+            // Optional: You can also decode the JWT payload right in the browser to see the user's email/name
+            // Note: This is just for UI purposes. Always verify the token on your backend!
+            const payload = JSON.parse(atob(idToken.split('.')[1]));
+            console.log("Decoded Payload:", payload);
+        }
+
+        // Initialize the library once the window loads
+        window.onload = function () {
+            google.accounts.id.initialize({
+                client_id: GOOGLE_CLIENT_ID,
+                callback: handleCredentialResponse
+            });
+
+            // Render the official Google Sign-In button
+            google.accounts.id.renderButton(
+                document.getElementById("buttonDiv"),
+                { theme: "outline", size: "large", text: "continue_with" }
+            );
+
+            // Optional: Prompt the One Tap dialog in the top right corner
+            google.accounts.id.prompt();
+        }
+    </script>
+</body>
+
+</html>
