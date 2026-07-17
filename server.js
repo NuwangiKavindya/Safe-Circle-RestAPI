@@ -8,17 +8,47 @@ const cors = require('cors');
 const { connectDB, sequelize } = require('./config/db');
 const swaggerUI = require('swagger-ui-express');
 const swaggerJsDoc = require('swagger-jsdoc');
+
+// Import models to register them with Sequelize
+const User = require('./models/User');
+const Device = require('./models/Device');
+const TrustedContact = require('./models/TrustedContact');
+const LocationLog = require('./models/LocationLog');
+const Alert = require('./models/Alert');
+
 const authRoutes = require('./routes/authRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
+const contactRoutes = require('./routes/contactRoutes');
+const locationRoutes = require('./routes/locationRoutes');
+const alertRoutes = require('./routes/alertRoutes');
+const verifyRoutes = require('./routes/verifyRoutes');
+
+const path = require('path');
+const http = require('http');
+const { Server } = require('socket.io');
 
 // Connect to database
 connectDB();
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST', 'PUT', 'DELETE']
+    }
+});
+
+// Attach socket.io engine to app so controllers can trigger socket events
+app.set('io', io);
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Serve static assets and uploads folder
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Swagger Setup
 const options = {
@@ -199,12 +229,34 @@ app.use('/api/auth', authRoutes);
  *         description: Server error
  */
 app.use('/api/device', deviceRoutes);
+app.use('/api/contacts', contactRoutes);
+app.use('/api/location', locationRoutes);
+app.use('/api/alerts', alertRoutes);
+app.use('/api/contacts/shared', verifyRoutes);
+
+// Socket.io Connection Logic
+io.on('connection', (socket) => {
+    console.log(`Socket client connected: ${socket.id}`);
+
+    // Join device room to receive location updates for a specific device
+    socket.on('join-device-room', (data) => {
+        const { deviceId } = data;
+        if (deviceId) {
+            socket.join(`device-${deviceId}`);
+            console.log(`Socket ${socket.id} joined room: device-${deviceId}`);
+        }
+    });
+
+    socket.on('disconnect', () => {
+        console.log(`Socket client disconnected: ${socket.id}`);
+    });
+});
 
 const PORT = process.env.PORT || 5001;
 
 // Sync DB & Start server
 sequelize.sync({ alter: true }).then(() => {
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
         console.log(`Server running on port ${PORT}`);
     });
 }).catch(err => {

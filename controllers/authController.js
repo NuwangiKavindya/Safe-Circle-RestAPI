@@ -96,6 +96,47 @@ exports.googleLogin = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Missing idToken' });
     }
 
+    // Sandbox bypass for testing Google Login in development without native setup
+    if (idToken.startsWith('sandbox-google-token-') && process.env.NODE_ENV !== 'production') {
+        try {
+            const parts = idToken.split('-');
+            const email = parts[3];
+            const name = parts.slice(4).join('-') || email.split('@')[0];
+            const googleId = `sandbox-${email}`;
+
+            let user = await User.findOne({ where: { email } });
+
+            if (!user) {
+                user = await User.create({
+                    fullName: name,
+                    email,
+                    authProvider: 'google',
+                    googleId,
+                });
+            } else {
+                if (!user.googleId) {
+                    user.googleId = googleId;
+                    await user.save();
+                }
+            }
+
+            const token = generateToken(user.id);
+
+            return res.status(200).json({
+                success: true,
+                token,
+                data: {
+                    id: user.id,
+                    fullName: user.fullName,
+                    email: user.email,
+                    phoneNumber: user.phoneNumber
+                }
+            });
+        } catch (error) {
+            return res.status(500).json({ success: false, message: error.message });
+        }
+    }
+
     try {
         const ticket = await client.verifyIdToken({
             idToken,
@@ -144,3 +185,56 @@ exports.googleLogin = async (req, res) => {
         });
     }
 };
+
+/**
+ * @desc    Login user via email & password
+ * @route   POST /api/auth/login
+ * @access  Public
+ */
+exports.login = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide email and password.',
+            });
+        }
+
+        const user = await User.findOne({ where: { email } });
+        if (!user || user.authProvider !== 'local') {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid credentials.',
+            });
+        }
+
+        const isMatch = await user.matchPassword(password);
+        if (!isMatch) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid credentials.',
+            });
+        }
+
+        const token = generateToken(user.id);
+
+        res.status(200).json({
+            success: true,
+            token,
+            data: {
+                id: user.id,
+                fullName: user.fullName,
+                email: user.email,
+                phoneNumber: user.phoneNumber
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+

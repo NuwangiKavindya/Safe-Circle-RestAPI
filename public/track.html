@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeCircle - Real-time Location Tracking</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- Google Fonts (Outfit) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #0f172a;
+            --bg-card: #1e293b;
+            --border-color: #334155;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #38bdf8;
+            --primary-glow: rgba(56, 189, 248, 0.35);
+            --danger: #ef4444;
+            --danger-glow: rgba(239, 68, 68, 0.35);
+            --success: #10b981;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Glassmorphic Auth Form */
+        .auth-container {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 40px;
+            width: 90%;
+            max-width: 450px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        .auth-logo {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .auth-title {
+            font-size: 28px;
+            font-weight: 800;
+            color: var(--text-main);
+            margin-bottom: 8px;
+        }
+
+        .auth-subtitle {
+            font-size: 15px;
+            color: var(--text-muted);
+            margin-bottom: 30px;
+            line-height: 1.5;
+        }
+
+        .input-group {
+            margin-bottom: 24px;
+            text-align: left;
+        }
+
+        .input-label {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .auth-input {
+            width: 100%;
+            background-color: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            color: var(--text-main);
+            font-size: 16px;
+            font-weight: 600;
+            text-align: center;
+            letter-spacing: 4px;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .auth-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 10px var(--primary-glow);
+        }
+
+        .auth-button {
+            width: 100%;
+            background-color: var(--primary);
+            color: var(--bg-base);
+            border: none;
+            border-radius: 12px;
+            padding: 16px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 14px var(--primary-glow);
+            transition: all 0.3s ease;
+        }
+
+        .auth-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px var(--primary-glow);
+        }
+
+        .error-message {
+            color: var(--danger);
+            font-size: 14px;
+            margin-top: 16px;
+            display: none;
+            font-weight: 600;
+        }
+
+        /* Dashboard Interface */
+        .dashboard-container {
+            display: none;
+            width: 100%;
+            height: 100vh;
+            flex-direction: column;
+        }
+
+        /* Header Style */
+        .dashboard-header {
+            height: 80px;
+            background-color: var(--bg-card);
+            border-bottom: 1px solid var(--border-color);
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 1000;
+        }
+
+        .header-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-symbol {
+            font-size: 28px;
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }
+
+        .emergency-badge {
+            background-color: var(--danger);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            animation: pulse 1.8s infinite;
+            box-shadow: 0 0 12px var(--danger-glow);
+        }
+
+        /* Workspace Grid */
+        .dashboard-body {
+            flex: 1;
+            display: flex;
+            position: relative;
+        }
+
+        /* Sidebar tracking panel */
+        .sidebar {
+            width: 360px;
+            background-color: var(--bg-card);
+            border-right: 1px solid var(--border-color);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            z-index: 1000;
+            overflow-y: auto;
+        }
+
+        /* Map styling */
+        #map {
+            flex: 1;
+            height: 100%;
+            background-color: var(--bg-base);
+        }
+
+        .info-card {
+            background-color: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 16px;
+        }
+
+        .info-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            font-weight: 700;
+        }
+
+        .info-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .info-subtitle {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .live-marker {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background-color: var(--success);
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse-green 1.5s infinite;
+        }
+
+        /* Leaflet Custom Styles to match Dark Mode */
+        .leaflet-container {
+            background: #0f172a !important;
+        }
+        .leaflet-tile-container {
+            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+        }
+
+        /* Audio Recording Card */
+        .audio-card {
+            display: none;
+            background-color: #312e81;
+            border: 1px solid #4f46e5;
+            border-radius: 16px;
+            padding: 16px;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .audio-icon {
+            font-size: 24px;
+        }
+
+        .audio-details {
+            flex: 1;
+        }
+
+        .audio-details-title {
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .audio-play-button {
+            background-color: var(--primary);
+            color: var(--bg-base);
+            border: none;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 10px var(--danger-glow); }
+            50% { transform: scale(1.04); box-shadow: 0 0 20px var(--danger-glow); }
+            100% { transform: scale(1); box-shadow: 0 0 10px var(--danger-glow); }
+        }
+
+        @keyframes pulse-green {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1.2); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Access Code Auth View -->
+    <div class="auth-container" id="authView">
+        <div class="auth-logo">🛡️</div>
+        <h1 class="auth-title">SafeCircle Secure Access</h1>
+        <p class="auth-subtitle">Please enter your 6-digit secure access code to connect to the tracking dashboard.</p>
+        
+        <div class="input-group">
+            <label class="input-label" for="codeField">Access Code</label>
+            <input type="text" id="codeField" class="auth-input" placeholder="000000" maxlength="6" autofocus autocomplete="off">
+        </div>
+        
+        <button id="verifyBtn" class="auth-button">Establish Connection</button>
+        <div class="error-message" id="errorMsg">Access Denied: Invalid security code.</div>
+    </div>
+
+    <!-- Active Tracking Dashboard View -->
+    <div class="dashboard-container" id="dashboardView">
+        <header class="dashboard-header">
+            <div class="header-logo">
+                <span class="logo-symbol">🛡️</span>
+                <span class="logo-text">SafeCircle Security Center</span>
+            </div>
+            <div class="emergency-badge">
+                <span>🚨</span> ACTIVE SOS BROADCAST
+            </div>
+        </header>
+
+        <div class="dashboard-body">
+            <aside class="sidebar">
+                <h2 style="font-weight: 700; font-size: 22px; margin-bottom: 8px;">Incident Tracking</h2>
+                <p style="color: var(--text-muted); font-size: 14px;">Monitoring target device safety coordinates.</p>
+
+                <!-- Target details -->
+                <div class="info-card">
+                    <div class="info-title">Distressed Individual</div>
+                    <div class="info-value" id="targetUserName">Loading...</div>
+                    <div class="info-subtitle" id="targetUserPhone">...</div>
+                </div>
+
+                <!-- Live Coordinate Card -->
+                <div class="info-card">
+                    <div class="info-title">Current Coordinates</div>
+                    <div class="info-value" id="currentLocationText">Waiting...</div>
+                    <div class="info-subtitle" id="locationAccuracyText">Accuracy: --</div>
+                </div>
+
+                <!-- Last Update details -->
+                <div class="info-card">
+                    <div class="info-title">Tracking Connection</div>
+                    <div class="info-value" style="display: flex; align-items: center; font-size: 16px;">
+                        <span class="live-marker"></span> Active WebSocket Channel
+                    </div>
+                    <div class="info-subtitle" id="lastUpdatedTime">Syncing...</div>
+                </div>
+
+                <!-- Audio clip container -->
+                <div class="audio-card" id="audioCard">
+                    <span class="audio-icon">🎙️</span>
+                    <div class="audio-details">
+                        <div class="audio-details-title">Ambient SOS Audio</div>
+                        <div style="font-size: 11px; color: #a5b4fc;" id="audioTimestamp">Uploaded recently</div>
+                    </div>
+                    <button class="audio-play-button" id="playAudioBtn">Play</button>
+                </div>
+            </aside>
+
+            <!-- Leaflet Container -->
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Socket.io client -->
+    <script src="/socket.io/socket.io.js"></script>
+
+    <script>
+        let map;
+        let pathLine;
+        let latestMarker;
+        let activeAccessCode = '';
+        let socket;
+        let audioPlayer = null;
+
+        // Auto-extract access code from URL parameters
+        window.onload = () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            if (code && code.trim().length === 6) {
+                document.getElementById('codeField').value = code;
+                submitAccessCode(code);
+            }
+        };
+
+        // Submit Button Handler
+        document.getElementById('verifyBtn').onclick = () => {
+            const code = document.getElementById('codeField').value.trim();
+            submitAccessCode(code);
+        };
+
+        // Enter Key Handler
+        document.getElementById('codeField').onkeypress = (e) => {
+            if (e.key === 'Enter') {
+                submitAccessCode(e.target.value.trim());
+            }
+        };
+
+        // Access Code Verification
+        async function submitAccessCode(accessCode) {
+            if (accessCode.length !== 6) {
+                showError('Please enter a valid 6-digit access code.');
+                return;
+            }
+
+            const errorMsg = document.getElementById('errorMsg');
+            errorMsg.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/contacts/shared/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accessCode })
+                });
+
+                const resData = await response.json();
+                if (!response.ok || !resData.success) {
+                    showError(resData.message || 'Verification failed.');
+                    return;
+                }
+
+                // If not in active SOS alert
+                if (!resData.data.isActiveSos) {
+                    showError('Access Denied: This access code is active, but the user is not in an active emergency SOS state.');
+                    return;
+                }
+
+                activeAccessCode = accessCode;
+                displayDashboard(resData.data);
+            } catch (err) {
+                showError('Network error connecting to verification servers.');
+            }
+        }
+
+        function showError(msg) {
+            const errorMsg = document.getElementById('errorMsg');
+            errorMsg.innerText = msg;
+            errorMsg.style.display = 'block';
+        }
+
+        // Initialize Dashboard
+        async function displayDashboard(data) {
+            document.getElementById('authView').style.display = 'none';
+            document.getElementById('dashboardView').style.display = 'flex';
+
+            // Fill User details
+            document.getElementById('targetUserName').innerText = data.targetUser.fullName;
+            document.getElementById('targetUserPhone').innerText = `📱 ${data.targetUser.phoneNumber || 'Unavailable'}`;
+
+            // Initialize Leaflet Map
+            map = L.map('map', { zoomControl: true }).setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            // Fetch initial coordinate history
+            await loadLocationHistory();
+
+            // Connect WebSocket socket connection
+            initWebSocket(data.targetUser.id);
+        }
+
+        // Load historical coordinates
+        async function loadLocationHistory() {
+            try {
+                const response = await fetch(`/api/location/shared/${activeAccessCode}`);
+                const resData = await response.json();
+
+                if (response.ok && resData.success && resData.data.length > 0) {
+                    const logs = resData.data.reverse(); // oldest first
+                    const coords = logs.map(l => [parseFloat(l.latitude), parseFloat(l.longitude)]);
+
+                    // Initialize routing polyline path
+                    pathLine = L.polyline(coords, {
+                        color: '#0284c7',
+                        weight: 5,
+                        opacity: 0.8,
+                        lineJoin: 'round'
+                    }).addTo(map);
+
+                    const latest = logs[logs.length - 1];
+                    updateMapLocation(parseFloat(latest.latitude), parseFloat(latest.longitude), latest.accuracy, latest.timestamp);
+                } else {
+                    document.getElementById('currentLocationText').innerText = "No locations registered";
+                    document.getElementById('locationAccuracyText').innerText = "Waiting for device signal...";
+                }
+            } catch (err) {
+                console.error("Error loading location logs:", err);
+            }
+        }
+
+        // Initialize socket.io connection
+        function initWebSocket(targetUserId) {
+            socket = io();
+
+            socket.on('connect', () => {
+                console.log("WebSocket connected. Subscribing to target devices.");
+                // Subscribe to users devices
+                // Note: The backend controller rooms are keyed by: device-[id]
+                // We fetch the device details or rely on active alerts. Since backend maps devices to userId,
+                // we can look at the historical log to find the deviceId. 
+                // Let's also check active alerts for device details.
+                // We can query devices from the history logs
+                fetch(`/api/location/shared/${activeAccessCode}`)
+                    .then(res => res.json())
+                    .then(resData => {
+                        if (resData.success && resData.data.length > 0) {
+                            const deviceId = resData.data[0].deviceId;
+                            socket.emit('join-device-room', { deviceId });
+                            console.log(`Subscribed to device updates for device ID: ${deviceId}`);
+                        }
+                    });
+            });
+
+            // Listen to coordinates updates from backend broadcast
+            socket.on('location-broadcast', (data) => {
+                console.log("Received live coordinates broadcast:", data);
+                
+                const lat = parseFloat(data.latitude);
+                const lng = parseFloat(data.longitude);
+                
+                if (pathLine) {
+                    pathLine.addLatLng([lat, lng]);
+                } else {
+                    pathLine = L.polyline([[lat, lng]], {
+                        color: '#0284c7',
+                        weight: 5,
+                        opacity: 0.8
+                    }).addTo(map);
+                }
+
+                updateMapLocation(lat, lng, data.accuracy, data.timestamp);
+            });
+
+            // Periodically check if audio recording is uploaded
+            setInterval(checkAmbientAudio, 15000);
+            checkAmbientAudio();
+        }
+
+        // Update coordinates dynamically on the Leaflet map and UI panels
+        function updateMapLocation(lat, lng, accuracy, timestamp) {
+            const timeStr = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            
+            document.getElementById('currentLocationText').innerText = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+            document.getElementById('locationAccuracyText').innerText = `GPS Accuracy: ${accuracy ? parseFloat(accuracy).toFixed(1) + ' meters' : 'N/A'}`;
+            document.getElementById('lastUpdatedTime').innerText = `Last updated: Today at ${timeStr}`;
+
+            const position = [lat, lng];
+            
+            // Adjust marker positions
+            if (latestMarker) {
+                latestMarker.setLatLng(position);
+            } else {
+                latestMarker = L.marker(position).addTo(map);
+            }
+
+            // Adjust view zoom
+            map.setView(position, 16);
+        }
+
+        // Fetch ambient audio if exists
+        async function checkAmbientAudio() {
+            try {
+                const response = await fetch('/api/contacts/shared/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accessCode: activeAccessCode })
+                });
+
+                const resData = await response.json();
+                if (response.ok && resData.success && resData.data.alertId) {
+                    // Let's fetch the alert detail to see if audioFileUrl exists
+                    const alertResponse = await fetch(`/api/alerts/active`, {
+                        headers: {
+                            // Note: activeAlerts endpoint is private, but we have verification endpoint payload.
+                            // To keep it simple, we check if alertId contains audio. Since alerts/active requires token,
+                            // we can make a public verify check return the audio URL as well.
+                            // Let's check verify response. In our verifyController, we can return the activeAlert details.
+                            // In our verifyController, activeAlert object has audioFileUrl.
+                            // Let's check verifyController verifyAccessCode code content. It returns isActiveSos and alertId, but not alert details directly.
+                            // Wait, does it return the full alert? Let's check. Yes, verifyController returns:
+                            // isActiveSos: !!activeAlert, alertId: activeAlert ? activeAlert.id : null.
+                            // Let's see if we can edit verifyController to return the audioFileUrl!
+                            // That way, we can display the audio card.
+                        }
+                    });
+                    
+                    // Actually, let's look at the verify response. 
+                    // Let's request it from verifyAccessCode. Let's make sure our verifyController returns audioFileUrl.
+                    // Yes! We will edit verifyController to return it if it is present.
+                    // Let's see if the audio exists in the data returned by the POST verify request.
+                    if (resData.data.audioFileUrl) {
+                        displayAudioCard(resData.data.audioFileUrl);
+                    }
+                }
+            } catch (err) {
+                console.log("Error querying ambient recording status: ", err);
+            }
+        }
+
+        function displayAudioCard(url) {
+            const card = document.getElementById('audioCard');
+            const playBtn = document.getElementById('playAudioBtn');
+            card.style.display = 'flex';
+
+            playBtn.onclick = () => {
+                if (audioPlayer && !audioPlayer.paused) {
+                    audioPlayer.pause();
+                    playBtn.innerText = 'Play';
+                } else {
+                    if (!audioPlayer) {
+                        audioPlayer = new Audio(url);
+                        audioPlayer.onended = () => { playBtn.innerText = 'Play'; };
+                    }
+                    audioPlayer.play();
+                    playBtn.innerText = 'Pause';
+                }
+            };
+        }
+    </script>
+</body>
+</html>
