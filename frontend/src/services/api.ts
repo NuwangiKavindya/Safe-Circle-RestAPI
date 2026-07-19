@@ -1,0 +1,727 @@
+import { Platform } from 'react-native';
+
+// Standard local port is 5001. Android emulators access localhost via 10.0.2.2.
+const LOCAL_HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+export const API_BASE_URL = `http://${LOCAL_HOST}:5001`;
+
+export interface RegisterPayload {
+  fullName: string;
+  email: string;
+  phoneNumber: string;
+  password?: string;
+  confirmPassword?: string;
+}
+
+export interface LoginPayload {
+  email: string;
+  password?: string;
+}
+
+export interface GoogleLoginPayload {
+  idToken: string;
+}
+
+export interface BindDevicePayload {
+  deviceName: string;
+  deviceModel: string;
+  imeiNumber: string;
+  deviceOs: string;
+}
+
+export interface AddContactPayload {
+  contactName: string;
+  contactPhone: string;
+  contactEmail?: string;
+  relationship?: string;
+}
+
+export interface TrustedContact {
+  id: string;
+  userId: string;
+  contactName: string;
+  contactPhone: string;
+  contactEmail?: string;
+  relationship?: string;
+  isVerified: boolean;
+  accessCode: string;
+  createdAt: string;
+}
+
+export interface ContactResponse {
+  success: boolean;
+  message?: string;
+  data?: TrustedContact;
+}
+
+export interface ContactListResponse {
+  success: boolean;
+  message?: string;
+  count?: number;
+  data?: TrustedContact[];
+}
+
+export interface AuthResponse {
+  success: boolean;
+  token?: string;
+  message?: string;
+  data?: {
+    id: string;
+    fullName: string;
+    email: string;
+    phoneNumber?: string;
+  };
+}
+
+export interface DeviceResponse {
+  success: boolean;
+  message?: string;
+  data?: {
+    id: string;
+    userId: string;
+    deviceName: string;
+    deviceModel: string;
+    imeiNumber: string;
+    deviceOs: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+}
+
+export interface DeviceListResponse {
+  success: boolean;
+  message?: string;
+  count?: number;
+  data?: Array<{
+    id: string;
+    userId: string;
+    deviceName: string;
+    deviceModel: string;
+    imeiNumber: string;
+    deviceOs: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+}
+
+export interface LocationPayload {
+  deviceId: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+}
+
+export interface LocationResponse {
+  success: boolean;
+  message?: string;
+  data?: {
+    id: string;
+    deviceId: string;
+    latitude: string;
+    longitude: string;
+    accuracy?: string;
+    timestamp: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+}
+
+export interface AlertPayload {
+  deviceId?: string;
+  alertType: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+export interface Alert {
+  id: string;
+  userId: string;
+  deviceId?: string;
+  alertType: string;
+  status: string;
+  latitude?: string;
+  longitude?: string;
+  resolvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  audioFileUrl?: string;
+}
+
+export interface AlertResponse {
+  success: boolean;
+  message?: string;
+  data?: Alert;
+}
+
+export interface ActiveAlertsResponse {
+  success: boolean;
+  message?: string;
+  count?: number;
+  data?: Alert[];
+}
+
+export interface VerifyCodeResponse {
+  success: boolean;
+  message?: string;
+  data?: {
+    contactName: string;
+    relationship: string;
+    targetUser: {
+      id: string;
+      fullName: string;
+      phoneNumber?: string;
+    };
+    isActiveSos: boolean;
+    alertId: string | null;
+    audioFileUrl: string | null;
+  };
+}
+
+export interface SharedLocationHistoryResponse {
+  success: boolean;
+  message?: string;
+  count?: number;
+  data?: Array<{
+    id: string;
+    deviceId: string;
+    latitude: string;
+    longitude: string;
+    accuracy?: string;
+    timestamp: string;
+  }>;
+}
+
+
+class ApiService {
+  /**
+   * Register a new user with email and password
+   */
+  async register(payload: RegisterPayload): Promise<AuthResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Registration failed',
+        };
+      }
+
+      return {
+        success: true,
+        token: data.token,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Login with email and password
+   */
+  async login(payload: LoginPayload): Promise<AuthResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Login failed',
+        };
+      }
+
+      return {
+        success: true,
+        token: data.token,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Login/Register via Google SSO
+   */
+  async googleLogin(payload: GoogleLoginPayload): Promise<AuthResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/google`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Google authentication failed',
+        };
+      }
+
+      return {
+        success: true,
+        token: data.token,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Fetch all bound devices for the current user
+   */
+  async getDevices(token: string): Promise<DeviceListResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/device`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to fetch devices',
+        };
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Bind a new device to the current user
+   */
+  async bindDevice(token: string, payload: BindDevicePayload): Promise<DeviceResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/device/bind`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Device binding failed',
+        };
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Unbind a device
+   */
+  async unbindDevice(token: string, deviceId: string): Promise<{ success: boolean; message?: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/device/${deviceId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Device unbinding failed',
+        };
+      }
+
+      return {
+        success: true,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Fetch all trusted contacts
+   */
+  async getContacts(token: string): Promise<ContactListResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/contacts`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to fetch contacts',
+        };
+      }
+
+      return {
+        success: true,
+        count: data.count,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Add a new trusted contact
+   */
+  async addContact(token: string, payload: AddContactPayload): Promise<ContactResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/contacts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to add trusted contact',
+        };
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Delete a trusted contact
+   */
+  async deleteContact(token: string, contactId: string): Promise<{ success: boolean; message?: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/contacts/${contactId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to delete trusted contact',
+        };
+      }
+
+      return {
+        success: true,
+        message: data.message,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Log device geolocation coordinates
+   */
+  async logLocation(token: string, payload: LocationPayload): Promise<LocationResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/location/log`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to log location',
+        };
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Trigger an SOS Alert
+   */
+  async triggerAlert(token: string, payload: AlertPayload): Promise<AlertResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/alerts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to trigger alert',
+        };
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Resolve an active SOS alert
+   */
+  async resolveAlert(token: string, alertId: string): Promise<AlertResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/alerts/${alertId}/resolve`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to resolve alert',
+        };
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Get user's active SOS alerts
+   */
+  async getActiveAlerts(token: string): Promise<ActiveAlertsResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/alerts/active`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to fetch active alerts',
+        };
+      }
+
+      return {
+        success: true,
+        count: data.count,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Verify contact 6-digit access code
+   */
+  async verifyAccessCode(accessCode: string): Promise<VerifyCodeResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/contacts/shared/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ accessCode }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Verification failed',
+        };
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Get shared distress tracking location history logs using access code
+   */
+  async getSharedLocationHistory(accessCode: string): Promise<SharedLocationHistoryResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/contacts/shared/shared/${accessCode}`, {
+        method: 'GET',
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to load tracking coordinates history',
+        };
+      }
+
+      return {
+        success: true,
+        count: data.count,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Upload SOS ambient audio recording
+   */
+  async uploadAmbientAudio(token: string, alertId: string, audioFile: any): Promise<AlertResponse> {
+    try {
+      const formData = new FormData();
+      formData.append('audio', audioFile);
+
+      const response = await fetch(`${API_BASE_URL}/api/contacts/shared/alerts/${alertId}/audio`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          // Note: Do not set Content-Type header when sending FormData, fetch will set it automatically with boundary.
+        },
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Ambient audio upload failed',
+        };
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+}
+
+export const apiService = new ApiService();
