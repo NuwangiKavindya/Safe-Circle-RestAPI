@@ -1,0 +1,89 @@
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.eslintcache
+.stylelintcache
+*.tgz
+
+# Environment / Secrets / Keys
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.staging
+*.env
+*.pem
+*.key
+backend/.env
+frontend/android/local.properties
+frontend/android/*.keystore
+!frontend/android/debug.keystore
+
+# IDEs and Editors
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Android build outputs and caches
+frontend/android/app/build/
+frontend/android/.gradle/
+frontend/android/.kotlin/
+frontend/android/.cxx/
+
+# iOS / Xcode build outputs and caches
+frontend/ios/DerivedData/
+frontend/ios/Pods/
+frontend/ios/Build/
+frontend/ios/build/
+frontend/ios/.xcode.env.local
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+
+# Fastlane
+**/fastlane/report.xml
+**/fastlane/Preview.html
+**/fastlane/screenshots/
+**/fastlane/test_output/
+
+# Ruby / CocoaPods
+frontend/vendor/bundle/
+frontend/.bundle/
+
+# React Native / Bundlers
+*.jsbundle
+.metro-health-check*
+
+# General Build and Cache
+dist/
+build/
+coverage/
+.nyc_output/
+.cache/
+.parcel-cache/
