@@ -46,6 +46,18 @@ app.set('io', io);
 app.use(cors());
 app.use(express.json());
 
+// Request logging middleware
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    if (req.body && Object.keys(req.body).length > 0) {
+        const bodyCopy = { ...req.body };
+        if (bodyCopy.password) bodyCopy.password = '[REDACTED]';
+        if (bodyCopy.confirmPassword) bodyCopy.confirmPassword = '[REDACTED]';
+        console.log(`  Body: ${JSON.stringify(bodyCopy)}`);
+    }
+    next();
+});
+
 // Serve static assets and uploads folder
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -256,8 +268,8 @@ const PORT = process.env.PORT || 5001;
 
 // Sync DB & Start server
 sequelize.sync({ alter: true }).then(() => {
-    server.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`);
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`Server running on port ${PORT} (0.0.0.0)`);
     });
 }).catch(err => {
     console.error('Failed to sync db: ' + err.message);

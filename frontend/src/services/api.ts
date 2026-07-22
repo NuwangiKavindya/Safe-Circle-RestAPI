@@ -172,6 +172,7 @@ export interface VerifyCodeResponse {
     };
     isActiveSos: boolean;
     alertId: string | null;
+    deviceId?: string | null;
     audioFileUrl: string | null;
   };
 }

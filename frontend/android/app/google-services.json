@@ -1,0 +1,34 @@
+{
+  "project_info": {
+    "project_number": "342423658982",
+    "project_id": "safecircleapp-sandbox",
+    "storage_bucket": "safecircleapp-sandbox.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:342423658982:android:5e8f16062ea3cd2c4a0d54",
+        "android_client_info": {
+          "package_name": "com.safecircleapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "342423658982-dkt3lat80cve8m7kgg92tl4b13iioqtn.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDummyKeyForSandboxTesting"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -59,6 +59,7 @@ exports.verifyAccessCode = async (req, res) => {
                 },
                 isActiveSos: !!activeAlert,
                 alertId: activeAlert ? activeAlert.id : null,
+                deviceId: activeAlert ? activeAlert.deviceId : null,
                 audioFileUrl: activeAlert ? activeAlert.audioFileUrl : null
             }
         });

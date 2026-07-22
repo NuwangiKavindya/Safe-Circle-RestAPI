@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   TextInput,
   ScrollView,
   ActivityIndicator,
@@ -13,8 +12,11 @@ import {
   Alert,
   Image
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { apiService, API_BASE_URL, TrustedContact, Alert as ApiAlert } from './src/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { io } from 'socket.io-client';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 
 type ScreenType = 'WELCOME' | 'SIGNUP' | 'DASHBOARD' | 'BIND_DEVICE' | 'ADD_CONTACT' | 'TRACKER_AUTH' | 'TRACKER_DASHBOARD';
 
@@ -71,6 +73,11 @@ const App = () => {
     password: '',
   });
 
+  // Password Visibility Toggle States
+  const [showPassword, setShowPassword] = useState(false);
+  const [showSignUpPassword, setShowSignUpPassword] = useState(false);
+  const [showSignUpConfirmPassword, setShowSignUpConfirmPassword] = useState(false);
+
   // Google SSO Token Dialog State
   const [showGoogleSsoDialog, setShowGoogleSsoDialog] = useState(false);
   const [ssoTokenInput, setSsoTokenInput] = useState('');
@@ -92,6 +99,7 @@ const App = () => {
   const [trackerLogs, setTrackerLogs] = useState<any[]>([]);
   const [trackerAudioPlaying, setTrackerAudioPlaying] = useState(false);
   const [audioProgress, setAudioProgress] = useState(0);
+  const socketRef = useRef<any>(null);
 
   // UI Animations
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -128,7 +136,7 @@ const App = () => {
     }).start();
   }, [currentScreen, fadeAnim]);
 
-  // Load session from AsyncStorage on startup
+  // Load session from AsyncStorage on startup and configure Google Sign-In
   useEffect(() => {
     const loadSession = async () => {
       try {
@@ -144,6 +152,13 @@ const App = () => {
       }
     };
     loadSession();
+
+    // Configure Google Sign-In SDK
+    GoogleSignin.configure({
+      webClientId: '342423658982-ehokj2fvf0itu21b2t7hs04ucmjcu6nt.apps.googleusercontent.com',
+      iosClientId: '342423658982-3sj5f5oiuv6hqduk15mtv69jtet1li4v.apps.googleusercontent.com',
+      offlineAccess: true,
+    });
   }, []);
 
   // Helper: Display floating error or success banner
@@ -242,9 +257,48 @@ const App = () => {
     }
   };
 
+  // Auth: Native Google Sign-In Handler
+  const handleNativeGoogleLogin = async () => {
+    try {
+      setLoading(true);
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      const idToken = userInfo.data?.idToken || (userInfo as any).idToken;
+
+      if (!idToken) {
+        throw new Error('Google Sign-In did not return an ID token.');
+      }
+
+      const result = await apiService.googleLogin({ idToken });
+      setLoading(false);
+
+      if (result.success && result.token && result.data) {
+        try {
+          await AsyncStorage.setItem('@safecircle_token', result.token);
+          await AsyncStorage.setItem('@safecircle_user', JSON.stringify(result.data));
+        } catch (e) {
+          console.log('Session cache error:', e);
+        }
+        setToken(result.token);
+        setUser(result.data);
+        setDevices([]);
+        setCurrentScreen('DASHBOARD');
+        triggerFeedback('Google Login Successful!', false);
+      } else {
+        triggerFeedback(result.message || 'Google SSO verification failed.');
+      }
+    } catch (error: any) {
+      setLoading(false);
+      console.log('Native Google Sign-in Error:', error);
+      // Fallback to Sandbox Account Selector for native sign-in issues (such as NETWORK_ERROR code 7 or missing console keys)
+      triggerFeedback('Opening Google Sandbox Account Selector...', false);
+      setShowGoogleSsoDialog(true);
+    }
+  };
+
   // Auth: Google SSO Handler
   const handleGoogleLoginWithMock = async (email: string, name: string) => {
-    const mockToken = `sandbox-google-token-${email}-${name}`;
+    const mockToken = `sandbox-google-token:::${email}:::${name}`;
     setLoading(true);
     const result = await apiService.googleLogin({ idToken: mockToken });
     setLoading(false);
@@ -657,11 +711,6 @@ const App = () => {
           }
           setTrackerInfo(verifyRes.data);
         }
-
-        const logsRes = await apiService.getSharedLocationHistory(trackerCode);
-        if (logsRes.success && logsRes.data) {
-          setTrackerLogs(logsRes.data);
-        }
       };
 
       pollTrackerUpdates();
@@ -672,6 +721,51 @@ const App = () => {
       if (intervalId) clearInterval(intervalId);
     };
   }, [currentScreen, trackerInfo, trackerCode]);
+
+  // Effect: Establish WebSocket connection for real-time safety updates
+  useEffect(() => {
+    if (currentScreen === 'TRACKER_DASHBOARD' && trackerInfo && trackerInfo.deviceId) {
+      const deviceId = trackerInfo.deviceId;
+      console.log(`Connecting to WebSocket Server at ${API_BASE_URL} for device: ${deviceId}`);
+      
+      // Initialize Socket connection
+      const socket = io(API_BASE_URL, {
+        transports: ['websocket'], // Use WebSocket transport primarily
+        forceNew: true
+      });
+      
+      socket.on('connect', () => {
+        console.log('WebSocket Connected successfully! Joining device room:', deviceId);
+        socket.emit('join-device-room', { deviceId });
+      });
+
+      socket.on('location-broadcast', (newLog: any) => {
+        console.log('Received location-broadcast event via WebSocket:', newLog);
+        if (newLog) {
+          setTrackerLogs(prevLogs => {
+            // Avoid duplicate coordinate logs in chronological list representation
+            const exists = prevLogs.some(log => (log.id && log.id === newLog.id) || log.timestamp === newLog.timestamp);
+            if (exists) return prevLogs;
+            return [newLog, ...prevLogs];
+          });
+        }
+      });
+
+      socket.on('disconnect', (reason) => {
+        console.log('WebSocket Disconnected:', reason);
+      });
+
+      socketRef.current = socket;
+
+      return () => {
+        console.log('Cleaning up WebSocket connection for device:', deviceId);
+        if (socket) {
+          socket.disconnect();
+        }
+        socketRef.current = null;
+      };
+    }
+  }, [currentScreen, trackerInfo]);
 
   // Effect: Simulate audio player progress increments
   useEffect(() => {
@@ -848,14 +942,24 @@ const App = () => {
                   />
 
                   <Text style={styles.inputLabel}>Password</Text>
-                  <TextInput
-                    placeholder="Enter your password"
-                    placeholderTextColor="#64748B"
-                    secureTextEntry
-                    style={styles.input}
-                    value={signInForm.password}
-                    onChangeText={text => setSignInForm(prev => ({ ...prev, password: text }))}
-                  />
+                  <View style={styles.passwordInputContainer}>
+                    <TextInput
+                      placeholder="Enter your password"
+                      placeholderTextColor="#64748B"
+                      secureTextEntry={!showPassword}
+                      style={styles.passwordInput}
+                      value={signInForm.password}
+                      onChangeText={text => setSignInForm(prev => ({ ...prev, password: text }))}
+                    />
+                    <TouchableOpacity
+                      style={styles.passwordToggleBtn}
+                      onPress={() => setShowPassword(prev => !prev)}
+                    >
+                      <Text style={styles.passwordToggleText}>
+                        {showPassword ? '🙈' : '👁️'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
 
                   <TouchableOpacity
                     style={[styles.primaryButton, loading && styles.disabledButton]}
@@ -878,7 +982,8 @@ const App = () => {
 
                 <TouchableOpacity
                   style={styles.googleButton}
-                  onPress={() => setShowGoogleSsoDialog(true)}
+                  onPress={handleNativeGoogleLogin}
+                  disabled={loading}
                 >
                   <Text style={styles.googleButtonText}>Continue with Google</Text>
                 </TouchableOpacity>
@@ -960,24 +1065,44 @@ const App = () => {
               />
 
               <Text style={styles.inputLabel}>Password</Text>
-              <TextInput
-                placeholder="Minimum 6 characters"
-                placeholderTextColor="#64748B"
-                secureTextEntry
-                style={styles.input}
-                value={signUpForm.password}
-                onChangeText={text => setSignUpForm(prev => ({ ...prev, password: text }))}
-              />
+              <View style={styles.passwordInputContainer}>
+                <TextInput
+                  placeholder="Minimum 6 characters"
+                  placeholderTextColor="#64748B"
+                  secureTextEntry={!showSignUpPassword}
+                  style={styles.passwordInput}
+                  value={signUpForm.password}
+                  onChangeText={text => setSignUpForm(prev => ({ ...prev, password: text }))}
+                />
+                <TouchableOpacity
+                  style={styles.passwordToggleBtn}
+                  onPress={() => setShowSignUpPassword(prev => !prev)}
+                >
+                  <Text style={styles.passwordToggleText}>
+                    {showSignUpPassword ? '🙈' : '👁️'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
               <Text style={styles.inputLabel}>Confirm Password</Text>
-              <TextInput
-                placeholder="Repeat password"
-                placeholderTextColor="#64748B"
-                secureTextEntry
-                style={styles.input}
-                value={signUpForm.confirmPassword}
-                onChangeText={text => setSignUpForm(prev => ({ ...prev, confirmPassword: text }))}
-              />
+              <View style={styles.passwordInputContainer}>
+                <TextInput
+                  placeholder="Repeat password"
+                  placeholderTextColor="#64748B"
+                  secureTextEntry={!showSignUpConfirmPassword}
+                  style={styles.passwordInput}
+                  value={signUpForm.confirmPassword}
+                  onChangeText={text => setSignUpForm(prev => ({ ...prev, confirmPassword: text }))}
+                />
+                <TouchableOpacity
+                  style={styles.passwordToggleBtn}
+                  onPress={() => setShowSignUpConfirmPassword(prev => !prev)}
+                >
+                  <Text style={styles.passwordToggleText}>
+                    {showSignUpConfirmPassword ? '🙈' : '👁️'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
               <TouchableOpacity
                 style={[styles.primaryButton, loading && styles.disabledButton]}
@@ -1706,6 +1831,30 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     borderWidth: 1,
     borderColor: '#334155',
+  },
+  passwordInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginBottom: 18,
+  },
+  passwordInput: {
+    flex: 1,
+    color: '#F8FAFC',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 15,
+  },
+  passwordToggleBtn: {
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  passwordToggleText: {
+    fontSize: 18,
   },
   tabContainer: {
     flexDirection: 'row',
