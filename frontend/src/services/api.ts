@@ -64,6 +64,7 @@ export interface AuthResponse {
   success: boolean;
   token?: string;
   message?: string;
+  requiresPhoneNumber?: boolean;
   data?: {
     id: string;
     fullName: string;
@@ -285,12 +286,48 @@ class ApiService {
       return {
         success: true,
         token: data.token,
+        requiresPhoneNumber: data.requiresPhoneNumber,
         data: data.data,
       };
     } catch (error: any) {
       return {
         success: false,
         message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Update Phone Number for authenticated user
+   */
+  async updatePhoneNumber(phoneNumber: string, token: string): Promise<AuthResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/update-phone`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ phoneNumber }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to update phone number',
+        };
+      }
+
+      return {
+        success: true,
+        message: data.message,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred while updating phone number',
       };
     }
   }

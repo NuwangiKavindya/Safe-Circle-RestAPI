@@ -150,10 +150,12 @@ exports.googleLogin = async (req, res) => {
             }
 
             const token = generateToken(user.id);
+            const requiresPhoneNumber = !user.phoneNumber || user.phoneNumber.trim() === '';
 
             return res.status(200).json({
                 success: true,
                 token,
+                requiresPhoneNumber,
                 data: {
                     id: user.id,
                     fullName: user.fullName,
@@ -202,10 +204,12 @@ exports.googleLogin = async (req, res) => {
         }
 
         const token = generateToken(user.id);
+        const requiresPhoneNumber = !user.phoneNumber || user.phoneNumber.trim() === '';
 
         res.status(200).json({
             success: true,
             token,
+            requiresPhoneNumber,
             data: {
                 id: user.id,
                 fullName: user.fullName,
@@ -219,6 +223,52 @@ exports.googleLogin = async (req, res) => {
             success: false,
             message: 'Invalid Google ID token',
         });
+    }
+};
+
+/**
+ * @desc    Update phone number for authenticated user
+ * @route   POST /api/auth/update-phone
+ * @access  Private
+ */
+exports.updatePhoneNumber = async (req, res) => {
+    try {
+        const { phoneNumber } = req.body;
+
+        if (!phoneNumber || !phoneNumber.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Phone number is required.'
+            });
+        }
+
+        const cleanPhone = phoneNumber.trim();
+
+        // Check if phone number is already used by another user
+        const existingPhone = await User.findOne({ where: { phoneNumber: cleanPhone } });
+        if (existingPhone && existingPhone.id !== req.user.id) {
+            return res.status(400).json({
+                success: false,
+                message: 'This phone number is already registered to another account.'
+            });
+        }
+
+        req.user.phoneNumber = cleanPhone;
+        await req.user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'Phone number updated successfully.',
+            data: {
+                id: req.user.id,
+                fullName: req.user.fullName,
+                email: req.user.email,
+                phoneNumber: req.user.phoneNumber
+            }
+        });
+    } catch (error) {
+        console.error('Update phone number error:', error);
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 

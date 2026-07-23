@@ -18,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { io } from 'socket.io-client';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 
-type ScreenType = 'WELCOME' | 'SIGNUP' | 'DASHBOARD' | 'BIND_DEVICE' | 'ADD_CONTACT' | 'TRACKER_AUTH' | 'TRACKER_DASHBOARD';
+type ScreenType = 'WELCOME' | 'SIGNUP' | 'DASHBOARD' | 'BIND_DEVICE' | 'ADD_CONTACT' | 'TRACKER_AUTH' | 'TRACKER_DASHBOARD' | 'GOOGLE_PHONE_REGISTER';
 
 interface UserData {
   id: string;
@@ -78,13 +78,6 @@ const App = () => {
   const [showSignUpPassword, setShowSignUpPassword] = useState(false);
   const [showSignUpConfirmPassword, setShowSignUpConfirmPassword] = useState(false);
 
-  // Google SSO Token Dialog State
-  const [showGoogleSsoDialog, setShowGoogleSsoDialog] = useState(false);
-  const [ssoTokenInput, setSsoTokenInput] = useState('');
-  const [isCustomGoogleAccount, setIsCustomGoogleAccount] = useState(false);
-  const [customGoogleName, setCustomGoogleName] = useState('');
-  const [customGoogleEmail, setCustomGoogleEmail] = useState('');
-
   // Device Binding Form State
   const [deviceForm, setDeviceForm] = useState({
     deviceName: '',
@@ -136,6 +129,9 @@ const App = () => {
     }).start();
   }, [currentScreen, fadeAnim]);
 
+  // Google Phone Registration Form State
+  const [googlePhoneInput, setGooglePhoneInput] = useState('');
+
   // Load session from AsyncStorage on startup and configure Google Sign-In
   useEffect(() => {
     const loadSession = async () => {
@@ -143,9 +139,14 @@ const App = () => {
         const cachedToken = await AsyncStorage.getItem('@safecircle_token');
         const cachedUser = await AsyncStorage.getItem('@safecircle_user');
         if (cachedToken && cachedUser) {
+          const parsedUser = JSON.parse(cachedUser);
           setToken(cachedToken);
-          setUser(JSON.parse(cachedUser));
-          setCurrentScreen('DASHBOARD');
+          setUser(parsedUser);
+          if (!parsedUser.phoneNumber || parsedUser.phoneNumber.trim() === '') {
+            setCurrentScreen('GOOGLE_PHONE_REGISTER');
+          } else {
+            setCurrentScreen('DASHBOARD');
+          }
         }
       } catch (err) {
         console.log('Error reading cached session:', err);
@@ -261,7 +262,13 @@ const App = () => {
   const handleNativeGoogleLogin = async () => {
     try {
       setLoading(true);
-      await GoogleSignin.hasPlayServices();
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      // Force clearing cached active session so native OS account picker always appears to select from all device accounts
+      try {
+        await GoogleSignin.signOut();
+      } catch (e) {
+        // Ignore error if not previously signed in
+      }
       const userInfo = await GoogleSignin.signIn();
       const idToken = userInfo.data?.idToken || (userInfo as any).idToken;
 
@@ -282,45 +289,65 @@ const App = () => {
         setToken(result.token);
         setUser(result.data);
         setDevices([]);
-        setCurrentScreen('DASHBOARD');
-        triggerFeedback('Google Login Successful!', false);
+        if (result.requiresPhoneNumber || !result.data.phoneNumber || result.data.phoneNumber.trim() === '') {
+          setCurrentScreen('GOOGLE_PHONE_REGISTER');
+          triggerFeedback('Please register your mobile phone number to complete signup.', false);
+        } else {
+          setCurrentScreen('DASHBOARD');
+          triggerFeedback('Google Login Successful!', false);
+        }
       } else {
         triggerFeedback(result.message || 'Google SSO verification failed.');
       }
     } catch (error: any) {
       setLoading(false);
-      console.log('Native Google Sign-in Error:', error);
-      // Fallback to Sandbox Account Selector for native sign-in issues (such as NETWORK_ERROR code 7 or missing console keys)
-      triggerFeedback('Opening Google Sandbox Account Selector...', false);
-      setShowGoogleSsoDialog(true);
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        console.log('User cancelled Google Sign-In flow');
+      } else if (error.code === statusCodes.IN_PROGRESS) {
+        console.log('Google Sign-In is already in progress');
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        triggerFeedback('Google Play Services are missing or out of date on this device.');
+      } else {
+        console.log('Native Google Sign-in Error:', error);
+        triggerFeedback(error.message || 'Google Sign-In failed.');
+      }
     }
   };
 
-  // Auth: Google SSO Handler
-  const handleGoogleLoginWithMock = async (email: string, name: string) => {
-    const mockToken = `sandbox-google-token:::${email}:::${name}`;
-    setLoading(true);
-    const result = await apiService.googleLogin({ idToken: mockToken });
-    setLoading(false);
+  // Auth: Submit Phone Number for Google SSO First-Time Users
+  const handleUpdateGooglePhone = async () => {
+    if (!googlePhoneInput.trim()) {
+      triggerFeedback('Please enter a valid mobile phone number.');
+      return;
+    }
 
-    if (result.success && result.token && result.data) {
-      try {
-        await AsyncStorage.setItem('@safecircle_token', result.token);
-        await AsyncStorage.setItem('@safecircle_user', JSON.stringify(result.data));
-      } catch (e) {
-        console.log('Session cache error:', e);
+    if (!token) {
+      triggerFeedback('Session expired. Please log in again.');
+      setCurrentScreen('WELCOME');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await apiService.updatePhoneNumber(googlePhoneInput.trim(), token);
+      setLoading(false);
+
+      if (res.success && res.data) {
+        setUser(res.data);
+        try {
+          await AsyncStorage.setItem('@safecircle_user', JSON.stringify(res.data));
+        } catch (e) {
+          console.log('Session update error:', e);
+        }
+        setGooglePhoneInput('');
+        triggerFeedback('Phone number registered successfully!', false);
+        setCurrentScreen('DASHBOARD');
+      } else {
+        triggerFeedback(res.message || 'Failed to update phone number.');
       }
-      setToken(result.token);
-      setUser(result.data);
-      setDevices([]); // reset local device list representation
-      setShowGoogleSsoDialog(false);
-      setIsCustomGoogleAccount(false);
-      setCustomGoogleEmail('');
-      setCustomGoogleName('');
-      setCurrentScreen('DASHBOARD');
-      triggerFeedback('Google Login Successful!', false);
-    } else {
-      triggerFeedback(result.message || 'Google SSO verification failed.');
+    } catch (err: any) {
+      setLoading(false);
+      triggerFeedback(err.message || 'An error occurred while updating phone number.');
     }
   };
 
@@ -573,6 +600,7 @@ const App = () => {
     try {
       await AsyncStorage.removeItem('@safecircle_token');
       await AsyncStorage.removeItem('@safecircle_user');
+      await GoogleSignin.signOut();
     } catch (e) {
       console.log('Error clearing session cache:', e);
     }
@@ -815,117 +843,7 @@ const App = () => {
               <Text style={styles.tagline}>Smart Personal Security System</Text>
             </View>
 
-            {showGoogleSsoDialog ? (
-              isCustomGoogleAccount ? (
-                <View style={styles.formCard}>
-                  <Text style={styles.formHeading}>Google Sandbox Login</Text>
-                  <Text style={styles.infoLabel}>
-                    Enter custom profile details to simulate logging in with any Google account.
-                  </Text>
-
-                  <Text style={styles.inputLabel}>Full Name</Text>
-                  <TextInput
-                    placeholder="e.g. Alex Mercer"
-                    placeholderTextColor="#64748B"
-                    style={styles.input}
-                    value={customGoogleName}
-                    onChangeText={setCustomGoogleName}
-                  />
-
-                  <Text style={styles.inputLabel}>Email Address</Text>
-                  <TextInput
-                    placeholder="e.g. alex.mercer@gmail.com"
-                    placeholderTextColor="#64748B"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    style={styles.input}
-                    value={customGoogleEmail}
-                    onChangeText={setCustomGoogleEmail}
-                  />
-
-                  <TouchableOpacity
-                    style={[styles.primaryButton, loading && styles.disabledButton]}
-                    onPress={() => {
-                      if (!customGoogleEmail.trim() || !customGoogleName.trim()) {
-                        triggerFeedback('Both Name and Email are required.');
-                        return;
-                      }
-                      handleGoogleLoginWithMock(customGoogleEmail.trim(), customGoogleName.trim());
-                    }}
-                    disabled={loading}
-                  >
-                    {loading ? (
-                      <ActivityIndicator color="#FFF" />
-                    ) : (
-                      <Text style={styles.primaryButtonText}>Continue</Text>
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.textButton}
-                    onPress={() => {
-                      setIsCustomGoogleAccount(false);
-                      setCustomGoogleEmail('');
-                      setCustomGoogleName('');
-                    }}
-                  >
-                    <Text style={styles.textButtonText}>Back to accounts</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <View style={styles.formCard}>
-                  <View style={styles.googleBrandHeader}>
-                    <Text style={styles.googleBrandLogo}>Google</Text>
-                    <Text style={styles.googleBrandTitle}>Choose an account</Text>
-                    <Text style={styles.googleBrandSubheading}>to continue to SafeCircle</Text>
-                  </View>
-
-                  <ScrollView style={{ maxHeight: 220, marginVertical: 12 }}>
-                    {[
-                      { name: 'Nuwangi Premawansha', email: 'nuwangi.k@gmail.com' },
-                      { name: 'John Doe', email: 'john.doe@gmail.com' },
-                      { name: 'Jane Smith', email: 'jane.smith@gmail.com' }
-                    ].map((account) => (
-                      <TouchableOpacity
-                        key={account.email}
-                        style={styles.googleAccountItem}
-                        onPress={() => handleGoogleLoginWithMock(account.email, account.name)}
-                      >
-                        <View style={styles.googleAvatar}>
-                          <Text style={styles.googleAvatarText}>{account.name.charAt(0)}</Text>
-                        </View>
-                        <View style={styles.googleAccountInfo}>
-                          <Text style={styles.googleAccountName}>{account.name}</Text>
-                          <Text style={styles.googleAccountEmail}>{account.email}</Text>
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-
-                  <TouchableOpacity
-                    style={styles.googleUseAnotherBtn}
-                    onPress={() => setIsCustomGoogleAccount(true)}
-                  >
-                    <Text style={styles.googleUseAnotherBtnText}>👤 Use another account</Text>
-                  </TouchableOpacity>
-
-                  <Text style={styles.googleSelectorFooter}>
-                    To continue, Google will share your name, email address, profile picture, and personal info with SafeCircle.
-                  </Text>
-
-                  <TouchableOpacity
-                    style={styles.textButton}
-                    onPress={() => {
-                      setShowGoogleSsoDialog(false);
-                      setIsCustomGoogleAccount(false);
-                    }}
-                  >
-                    <Text style={styles.textButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              )
-            ) : (
-              <View style={styles.buttonContainer}>
+            <View style={styles.buttonContainer}>
                 {/* Email/Password Login Card */}
                 <View style={styles.loginCard}>
                   <Text style={styles.loginCardHeading}>Sign In</Text>
@@ -1012,7 +930,6 @@ const App = () => {
                   <Text style={styles.metaText}>Status: Connected to Database</Text>
                 </View>
               </View>
-            )}
           </ScrollView>
         )}
 
@@ -1113,6 +1030,63 @@ const App = () => {
                   <ActivityIndicator color="#FFF" />
                 ) : (
                   <Text style={styles.primaryButtonText}>Register User</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        )}
+
+        {/* ==================== SCREEN 2.5: GOOGLE PHONE REGISTRATION ==================== */}
+        {currentScreen === 'GOOGLE_PHONE_REGISTER' && (
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            <View style={styles.subHeader}>
+              <TouchableOpacity
+                onPress={() => {
+                  setToken(null);
+                  setUser(null);
+                  AsyncStorage.removeItem('@safecircle_token');
+                  AsyncStorage.removeItem('@safecircle_user');
+                  setCurrentScreen('WELCOME');
+                }}
+                style={styles.backButton}
+              >
+                <Text style={styles.backButtonText}>← Cancel</Text>
+              </TouchableOpacity>
+              <Image
+                source={require('./assets/logo.png')}
+                style={styles.miniLogo}
+              />
+              <Text style={styles.subTitle}>Complete Profile</Text>
+            </View>
+
+            <View style={styles.formCard}>
+              <View style={styles.googleBrandHeader}>
+                <Text style={styles.googleBrandLogo}>Google Account Verified</Text>
+                <Text style={styles.googleBrandTitle}>Phone Number Required</Text>
+                <Text style={styles.googleBrandSubheading}>
+                  Welcome, {user?.fullName || 'User'}! Please register your mobile number to complete your profile and enable emergency alert notifications.
+                </Text>
+              </View>
+
+              <Text style={styles.inputLabel}>Mobile Phone Number</Text>
+              <TextInput
+                placeholder="+1234567890"
+                placeholderTextColor="#64748B"
+                keyboardType="phone-pad"
+                style={styles.input}
+                value={googlePhoneInput}
+                onChangeText={setGooglePhoneInput}
+              />
+
+              <TouchableOpacity
+                style={[styles.primaryButton, loading && styles.disabledButton]}
+                onPress={handleUpdateGooglePhone}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Complete Registration</Text>
                 )}
               </TouchableOpacity>
             </View>
