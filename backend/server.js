@@ -259,6 +259,41 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Real-Time Location Update event from physical device GPS
+    socket.on('location_update', async (data) => {
+        const { deviceId, latitude, longitude, accuracy, speed, heading, timestamp } = data;
+        if (!deviceId || latitude === undefined || longitude === undefined) {
+            return;
+        }
+
+        console.log(`[Socket.IO] Real-time location update received for device-${deviceId}: ${latitude}, ${longitude}`);
+
+        const payload = {
+            deviceId,
+            latitude,
+            longitude,
+            accuracy: accuracy || 5.0,
+            speed: speed || 0,
+            heading: heading || 0,
+            timestamp: timestamp || new Date().toISOString()
+        };
+
+        // 1. Broadcast immediately to any connected trusted contact watching this device room
+        io.to(`device-${deviceId}`).emit('location-broadcast', payload);
+
+        // 2. Asynchronously persist location log to database
+        try {
+            await LocationLog.create({
+                deviceId,
+                latitude,
+                longitude,
+                accuracy: accuracy || 5.0
+            });
+        } catch (err) {
+            console.error('[Socket.IO] Failed to persist location update:', err.message);
+        }
+    });
+
     socket.on('disconnect', () => {
         console.log(`Socket client disconnected: ${socket.id}`);
     });

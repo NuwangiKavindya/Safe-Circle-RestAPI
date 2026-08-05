@@ -34,7 +34,11 @@
 		<true/>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string>SafeCircle needs access to your location to share live safety tracking coordinates with your trusted contacts during active monitoring.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>SafeCircle requires background location access to broadcast emergency updates to your safety circle even when the app is minimized.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>SafeCircle requires background location access to broadcast emergency updates to your safety circle even when the app is minimized.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

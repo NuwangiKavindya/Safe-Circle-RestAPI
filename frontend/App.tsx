@@ -6,6 +6,7 @@ import { io } from 'socket.io-client';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 
 import { apiService, API_BASE_URL } from './src/services/api';
+import { locationService } from './src/services/locationService';
 import {
   ScreenType,
   UserData,
@@ -467,32 +468,33 @@ const App = () => {
     }
   }, [token]);
 
-  // Periodic background tracking simulation
+  // Real-Time GPS location tracking using Google Fused Location Provider API & WebSockets
   useEffect(() => {
-    let intervalId: any = null;
     if (token && currentScreen === 'DASHBOARD' && devices.length > 0) {
-      const logCurrentLocation = async () => {
-        const primaryDevice = devices[0];
-        if (!primaryDevice.id) return;
+      const primaryDevice = devices[0];
+      if (primaryDevice && primaryDevice.id) {
+        console.log(`[Fused Location Provider] Initializing live GPS tracking for device: ${primaryDevice.deviceName} (ID: ${primaryDevice.id})`);
+        
+        // Ensure Socket.IO client instance exists for socket emission
+        if (!socketRef.current) {
+          socketRef.current = io(API_BASE_URL, {
+            transports: ['websocket'],
+            forceNew: true,
+          });
+        }
 
-        const mockLat = 37.7749 + (Math.random() - 0.5) * 0.01;
-        const mockLng = -122.4194 + (Math.random() - 0.5) * 0.01;
-
-        console.log(`[Tracking] Logging location for device: ${primaryDevice.deviceName} (ID: ${primaryDevice.id})`);
-        await apiService.logLocation(token, {
-          deviceId: primaryDevice.id,
-          latitude: mockLat,
-          longitude: mockLng,
-          accuracy: 10.0,
-        });
-      };
-
-      logCurrentLocation();
-      intervalId = setInterval(logCurrentLocation, 30000);
+        locationService.startLocationTracking(
+          primaryDevice.id,
+          token,
+          socketRef.current
+        );
+      }
+    } else {
+      locationService.stopLocationTracking();
     }
 
     return () => {
-      if (intervalId) clearInterval(intervalId);
+      locationService.stopLocationTracking();
     };
   }, [token, currentScreen, devices]);
 
