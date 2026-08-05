@@ -2,6 +2,7 @@ import React from 'react';
 import {
   View,
   Text,
+  TextInput,
   ScrollView,
   TouchableOpacity,
   Animated,
@@ -11,12 +12,14 @@ import { DeviceCard } from '../components/DeviceCard';
 import { ContactCard } from '../components/ContactCard';
 import { MapViewComponent } from '../components/MapViewComponent';
 import { UserData, BoundDevice, TrustedContact, ApiAlert } from '../types';
+import { SafeZone } from '../services/api';
 import { globalStyles, COLORS } from '../styles/theme';
 
 interface DashboardScreenProps {
   user: UserData | null;
   devices: BoundDevice[];
   contacts: TrustedContact[];
+  safeZones?: SafeZone[];
   activeAlert: ApiAlert | null;
   pulseAnim: Animated.Value;
   loading: boolean;
@@ -26,6 +29,9 @@ interface DashboardScreenProps {
   onUploadAmbientAudio: () => void;
   onNavigateBindDevice: () => void;
   onNavigateAddContact: () => void;
+  onNavigateFullScreenMap?: () => void;
+  onCreateSafeZone?: (zoneName: string, radiusMeters: number) => void;
+  onDeleteSafeZone?: (safeZoneId: string) => void;
   onUnbindDevice: (deviceId: string) => void;
   onDeleteContact: (contactId: string) => void;
 }
@@ -34,6 +40,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   user,
   devices,
   contacts,
+  safeZones = [],
   activeAlert,
   pulseAnim,
   loading,
@@ -43,9 +50,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onUploadAmbientAudio,
   onNavigateBindDevice,
   onNavigateAddContact,
+  onNavigateFullScreenMap,
+  onCreateSafeZone,
+  onDeleteSafeZone,
   onUnbindDevice,
   onDeleteContact,
 }) => {
+  // Safe Zone Form State
+  const [newZoneName, setNewZoneName] = React.useState('');
+  const [newZoneRadius, setNewZoneRadius] = React.useState(200);
+
+  const handleCreateZoneSubmit = () => {
+    if (!newZoneName.trim()) return;
+    if (onCreateSafeZone) {
+      onCreateSafeZone(newZoneName.trim(), newZoneRadius);
+      setNewZoneName('');
+    }
+  };
+
   // Use mock primary location coords for map preview on user dashboard
   const primaryLat = activeAlert && activeAlert.latitude ? parseFloat(String(activeAlert.latitude)) : 37.7749;
   const primaryLng = activeAlert && activeAlert.longitude ? parseFloat(String(activeAlert.longitude)) : -122.4194;
@@ -141,9 +163,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <View style={styles.devicesSection}>
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionHeading}>Live Geolocation Map</Text>
-          <View style={styles.liveBadge}>
-            <View style={styles.liveBadgeDot} />
-            <Text style={styles.liveBadgeText}>Active GPS</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {onNavigateFullScreenMap && (
+              <TouchableOpacity
+                style={[styles.addButtonMini, { marginRight: 8, backgroundColor: COLORS.indigoBg, borderColor: COLORS.accentCyan }]}
+                onPress={onNavigateFullScreenMap}
+              >
+                <Text style={[styles.addButtonMiniText, { color: COLORS.accentCyan }]}>⛶ Fullscreen</Text>
+              </TouchableOpacity>
+            )}
+            <View style={styles.liveBadge}>
+              <View style={styles.liveBadgeDot} />
+              <Text style={styles.liveBadgeText}>Active GPS</Text>
+            </View>
           </View>
         </View>
         <MapViewComponent
@@ -154,8 +186,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             { latitude: primaryLat, longitude: primaryLng, timestamp: new Date().toISOString() },
             { latitude: primaryLat + 0.002, longitude: primaryLng + 0.002, timestamp: new Date(Date.now() - 30000).toISOString() },
           ]}
+          safeZones={safeZones}
           targetName={user?.fullName || 'Primary Device'}
           height={260}
+          onExpandFullScreen={onNavigateFullScreenMap}
         />
       </View>
 
@@ -203,6 +237,106 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         ) : (
           contacts.map((contact, index) => (
             <ContactCard key={contact.id || index} contact={contact} onDelete={onDeleteContact} />
+          ))
+        )}
+      </View>
+
+      {/* Safe Zones (Geofencing) Section */}
+      <View style={styles.devicesSection}>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionHeading}>Safe Zones (Geofencing)</Text>
+          <View style={styles.liveBadge}>
+            <View style={[styles.liveBadgeDot, { backgroundColor: COLORS.accentGreen }]} />
+            <Text style={[styles.liveBadgeText, { color: COLORS.accentGreen }]}>
+              {safeZones.length} Active
+            </Text>
+          </View>
+        </View>
+
+        {/* Quick Add Safe Zone Form Card */}
+        <View style={[styles.profileSummaryCard, { marginBottom: 16 }]}>
+          <Text style={[globalStyles.inputLabel, { color: COLORS.textPrimary, marginBottom: 10 }]}>
+            🛡️ Create New Safe Zone
+          </Text>
+
+          <TextInput
+            style={globalStyles.input}
+            placeholder="Zone Name (e.g. Home, Campus, Work)"
+            placeholderTextColor={COLORS.textMuted}
+            value={newZoneName}
+            onChangeText={setNewZoneName}
+          />
+
+          <Text style={[globalStyles.inputLabel, { marginBottom: 8 }]}>Select Radius Boundary:</Text>
+          <View style={{ flexDirection: 'row', marginBottom: 16 }}>
+            {[100, 200, 500].map((radius) => (
+              <TouchableOpacity
+                key={radius}
+                style={{
+                  flex: 1,
+                  paddingVertical: 8,
+                  marginHorizontal: 4,
+                  borderRadius: 10,
+                  backgroundColor: newZoneRadius === radius ? COLORS.indigoBg : COLORS.bgDark,
+                  borderWidth: 1,
+                  borderColor: newZoneRadius === radius ? COLORS.accentCyan : COLORS.borderDark,
+                  alignItems: 'center',
+                }}
+                onPress={() => setNewZoneRadius(radius)}
+              >
+                <Text
+                  style={{
+                    color: newZoneRadius === radius ? COLORS.accentCyan : COLORS.textSecondary,
+                    fontWeight: '700',
+                    fontSize: 13,
+                  }}
+                >
+                  {radius}m
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <TouchableOpacity
+            style={[globalStyles.primaryButton, { backgroundColor: COLORS.accentGreen }]}
+            onPress={handleCreateZoneSubmit}
+          >
+            <Text style={globalStyles.primaryButtonText}>🛡️ Set Safe Zone at Location</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Active Safe Zones List */}
+        {safeZones.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTextIcon}>🛡️</Text>
+            <Text style={styles.emptyText}>No safe zones configured yet.</Text>
+            <Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 4, textAlign: 'center' }}>
+              Create a safe zone above to enable geofence breach monitoring.
+            </Text>
+          </View>
+        ) : (
+          safeZones.map((zone, index) => (
+            <View key={zone.id || index} style={styles.deviceListItem}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                <Text style={{ fontSize: 22, marginRight: 12 }}>🛡️</Text>
+                <View>
+                  <Text style={{ color: COLORS.textPrimary, fontWeight: '700', fontSize: 15 }}>
+                    {zone.zoneName}
+                  </Text>
+                  <Text style={{ color: COLORS.accentGreen, fontSize: 12, marginTop: 2, fontWeight: '600' }}>
+                    Radius: {zone.radiusMeters} meters • Status: Active
+                  </Text>
+                </View>
+              </View>
+              {onDeleteSafeZone && (
+                <TouchableOpacity
+                  style={{ padding: 8 }}
+                  onPress={() => onDeleteSafeZone(zone.id)}
+                >
+                  <Text style={{ fontSize: 16 }}>🗑️</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           ))
         )}
       </View>

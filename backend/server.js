@@ -15,6 +15,7 @@ const Device = require('./models/Device');
 const TrustedContact = require('./models/TrustedContact');
 const LocationLog = require('./models/LocationLog');
 const Alert = require('./models/Alert');
+const SafeZone = require('./models/SafeZone');
 
 const authRoutes = require('./routes/authRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
@@ -22,6 +23,7 @@ const contactRoutes = require('./routes/contactRoutes');
 const locationRoutes = require('./routes/locationRoutes');
 const alertRoutes = require('./routes/alertRoutes');
 const verifyRoutes = require('./routes/verifyRoutes');
+const safeZoneRoutes = require('./routes/safeZoneRoutes');
 
 const path = require('path');
 const http = require('http');
@@ -245,6 +247,20 @@ app.use('/api/contacts', contactRoutes);
 app.use('/api/location', locationRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/contacts/shared', verifyRoutes);
+app.use('/api/geofence', safeZoneRoutes);
+
+// Haversine Distance helper for Geofence evaluation (meters)
+const calculateDistanceMeters = (lat1, lon1, lat2, lon2) => {
+    const R = 6371000; // Earth radius in meters
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+};
 
 // Socket.io Connection Logic
 io.on('connection', (socket) => {
@@ -291,6 +307,50 @@ io.on('connection', (socket) => {
             });
         } catch (err) {
             console.error('[Socket.IO] Failed to persist location update:', err.message);
+        }
+
+        // 3. Geofence Breach Check: Verify if coordinates breach any active user Safe Zones
+        try {
+            const device = await Device.findByPk(deviceId);
+            if (device && device.userId) {
+                const activeSafeZones = await SafeZone.findAll({
+                    where: { userId: device.userId, isActive: true }
+                });
+
+                if (activeSafeZones.length > 0) {
+                    let insideAnyZone = false;
+                    let breachedZones = [];
+
+                    for (const zone of activeSafeZones) {
+                        const dist = calculateDistanceMeters(
+                            parseFloat(latitude),
+                            parseFloat(longitude),
+                            parseFloat(zone.latitude),
+                            parseFloat(zone.longitude)
+                        );
+
+                        if (dist <= parseFloat(zone.radiusMeters)) {
+                            insideAnyZone = true;
+                        } else {
+                            breachedZones.push({ zoneName: zone.zoneName, distance: Math.round(dist), radius: zone.radiusMeters });
+                        }
+                    }
+
+                    if (!insideAnyZone) {
+                        console.warn(`[GEOFENCE ALERT] Device ${deviceId} breached safe zones! Current coordinates: ${latitude}, ${longitude}`);
+                        io.to(`device-${deviceId}`).emit('geofence-breach', {
+                            deviceId,
+                            latitude,
+                            longitude,
+                            breachedZones,
+                            timestamp: new Date().toISOString(),
+                            message: `⚠️ GEOFENCE WARNING: Device exited designated safe zones!`
+                        });
+                    }
+                }
+            }
+        } catch (geofenceErr) {
+            console.error('[GEOFENCE] Error evaluating geofence breach:', geofenceErr.message);
         }
     });
 

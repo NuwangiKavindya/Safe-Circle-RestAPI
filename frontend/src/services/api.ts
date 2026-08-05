@@ -47,6 +47,24 @@ export interface TrustedContact {
   createdAt: string;
 }
 
+export interface SafeZone {
+  id: string;
+  userId: string;
+  zoneName: string;
+  latitude: number | string;
+  longitude: number | string;
+  radiusMeters: number | string;
+  isActive: boolean;
+  createdAt?: string;
+}
+
+export interface CreateSafeZonePayload {
+  zoneName: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters?: number;
+}
+
 export interface ContactResponse {
   success: boolean;
   message?: string;
@@ -752,6 +770,104 @@ class ApiService {
       return {
         success: true,
         data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Fetch user's active safe zones (geofences)
+   */
+  async getSafeZones(token: string): Promise<{ success: boolean; data?: SafeZone[]; message?: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/geofence`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to fetch safe zones',
+        };
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Create a new safe zone (geofence)
+   */
+  async createSafeZone(token: string, payload: CreateSafeZonePayload): Promise<{ success: boolean; data?: SafeZone; message?: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/geofence`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to create safe zone',
+        };
+      }
+
+      return {
+        success: true,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Delete a safe zone (geofence)
+   */
+  async deleteSafeZone(token: string, safeZoneId: string): Promise<{ success: boolean; message?: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/geofence/${safeZoneId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to delete safe zone',
+        };
+      }
+
+      return {
+        success: true,
+        message: data.message,
       };
     } catch (error: any) {
       return {

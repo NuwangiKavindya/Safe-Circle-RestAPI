@@ -10,6 +10,7 @@ import {
 } from '@maplibre/maplibre-react-native';
 import { calculateDistanceMeters, calculateBearingDegrees } from '../utils/distance';
 import { offlineMapService } from '../services/offlineMapService';
+import { SafeZone } from '../services/api';
 import { COLORS } from '../styles/theme';
 
 interface LocationLog {
@@ -26,8 +27,13 @@ interface MapViewComponentProps {
   trackerLatitude?: number | null;
   trackerLongitude?: number | null;
   logs?: LocationLog[];
+  safeZones?: SafeZone[];
   targetName?: string;
-  height?: number;
+  height?: number | string;
+  isFullScreen?: boolean;
+  onBack?: () => void;
+  onExpandFullScreen?: () => void;
+  onOpenARView?: () => void;
 }
 
 const MAP_STYLES = {
@@ -42,8 +48,13 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
   trackerLatitude,
   trackerLongitude,
   logs = [],
+  safeZones = [],
   targetName = 'Target Device',
   height = 340,
+  isFullScreen = false,
+  onBack,
+  onExpandFullScreen,
+  onOpenARView,
 }) => {
   const cameraRef = useRef<CameraRef>(null);
   const [currentStyle, setCurrentStyle] = useState<string>(MAP_STYLES.DARK);
@@ -141,6 +152,41 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
     ],
   };
 
+  // Construct GeoJSON Polygon features for Active Safe Zones Geofences
+  const safeZoneFeatures: GeoJSON.Feature<GeoJSON.Polygon>[] = safeZones.map((zone) => {
+    const centerLng = parseFloat(String(zone.longitude));
+    const centerLat = parseFloat(String(zone.latitude));
+    const radiusMeters = parseFloat(String(zone.radiusMeters)) || 200;
+
+    const coords: [number, number][] = [];
+    const km = radiusMeters / 1000;
+    const distanceX = km / (111.32 * Math.cos((centerLat * Math.PI) / 180));
+    const distanceY = km / 110.574;
+    const points = 32;
+
+    for (let i = 0; i < points; i++) {
+      const theta = (i / points) * (2 * Math.PI);
+      const x = distanceX * Math.cos(theta);
+      const y = distanceY * Math.sin(theta);
+      coords.push([centerLng + x, centerLat + y]);
+    }
+    coords.push(coords[0]);
+
+    return {
+      type: 'Feature',
+      properties: { name: zone.zoneName },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [coords],
+      },
+    };
+  });
+
+  const safeZoneGeoJSON: GeoJSON.FeatureCollection<GeoJSON.Polygon> = {
+    type: 'FeatureCollection',
+    features: safeZoneFeatures,
+  };
+
   // Recenter map camera on target device pin
   const handleRecenter = () => {
     cameraRef.current?.flyTo({
@@ -178,10 +224,32 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
   };
 
   return (
-    <View style={[styles.container, { height }]}>
+    <View style={isFullScreen ? styles.fullScreenContainer : [styles.container, { height }]}>
+      {/* Google Maps Style Top Floating Header Bar */}
+      {isFullScreen && (
+        <View style={styles.googleMapsTopBar}>
+          {onBack && (
+            <TouchableOpacity style={styles.googleMapsBackBtn} onPress={onBack} activeOpacity={0.8}>
+              <Text style={styles.googleMapsBackBtnText}>← Back</Text>
+            </TouchableOpacity>
+          )}
+          <View style={styles.googleMapsTitleBox}>
+            <Text style={styles.googleMapsTitleText} numberOfLines={1}>📍 {targetName}</Text>
+            <Text style={styles.googleMapsSubtitleText}>Live Satellite & Geolocation Stream</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Floating Back Button for Embedded Maps */}
+      {!isFullScreen && onBack && (
+        <TouchableOpacity style={styles.backFloatingBtn} onPress={onBack} activeOpacity={0.8}>
+          <Text style={styles.backFloatingBtnText}>← Back to Home</Text>
+        </TouchableOpacity>
+      )}
+
       {/* FINAL APPROACH RADAR BANNER (< 15 METERS) */}
       {isFinalApproach && (
-        <View style={styles.finalApproachBanner}>
+        <View style={[styles.finalApproachBanner, isFullScreen ? { top: 72 } : onBack ? { top: 52 } : null]}>
           <Text style={styles.finalApproachTitle}>
             🎯 FINAL APPROACH RADAR ACTIVE • {proximityDistance ? `${proximityDistance.toFixed(1)}m away` : '< 15m away'}
           </Text>
@@ -238,42 +306,117 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
             />
           </GeoJSONSource>
         )}
+
+        {/* Active Safe Zones Geofence Circles */}
+        {safeZoneFeatures.length > 0 && (
+          <GeoJSONSource id="safezones-source" data={safeZoneGeoJSON}>
+            <Layer
+              id="safezones-fill"
+              type="fill"
+              paint={{
+                'fill-color': COLORS.accentGreen,
+                'fill-opacity': 0.2,
+              }}
+            />
+            <Layer
+              id="safezones-outline"
+              type="line"
+              paint={{
+                'line-color': COLORS.accentGreen,
+                'line-width': 2.5,
+              }}
+            />
+          </GeoJSONSource>
+        )}
       </Map>
 
-      {/* Top Live GPS Info Badge */}
-      <View style={styles.mapOverlayBadge}>
-        <View style={[styles.livePulseDot, isFinalApproach && styles.pulseDotRadar]} />
-        <Text style={styles.mapOverlayText}>
-          LIVE GPS • {targetName} • {latitude.toFixed(5)}, {longitude.toFixed(5)} (±{accuracy ? accuracy.toFixed(1) : '10'}m)
-        </Text>
-      </View>
+      {/* Top Live GPS Info Badge for Embedded Mode */}
+      {!isFullScreen && (
+        <View style={[styles.mapOverlayBadge, onBack ? { top: 52 } : null]}>
+          <View style={[styles.livePulseDot, isFinalApproach && styles.pulseDotRadar]} />
+          <Text style={styles.mapOverlayText}>
+            LIVE GPS • {targetName} • {latitude.toFixed(5)}, {longitude.toFixed(5)} (±{accuracy ? accuracy.toFixed(1) : '10'}m)
+          </Text>
+        </View>
+      )}
 
       {/* Offline Tile Caching Status Toast */}
       {cacheProgress !== null && (
-        <View style={styles.cacheProgressBadge}>
+        <View style={[styles.cacheProgressBadge, isFullScreen ? { top: 80 } : null]}>
           <Text style={styles.cacheProgressText}>
             💾 Caching Map Tiles Offline... {cacheProgress}%
           </Text>
         </View>
       )}
       {isCached && cacheProgress === null && (
-        <View style={[styles.cacheProgressBadge, { backgroundColor: COLORS.accentGreenBg }]}>
+        <View style={[styles.cacheProgressBadge, { backgroundColor: COLORS.accentGreenBg }, isFullScreen ? { top: 80 } : null]}>
           <Text style={styles.cacheProgressText}>✅ Offline Map Cached</Text>
         </View>
       )}
 
-      {/* Interactive Map Control Floating Action Buttons */}
-      <View style={styles.controlsContainer}>
-        <TouchableOpacity style={styles.controlBtn} onPress={handleRecenter}>
-          <Text style={styles.controlBtnIcon}>🎯</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.controlBtn} onPress={handleToggleStyle}>
-          <Text style={styles.controlBtnIcon}>{isDarkMode ? '🌙' : '☀️'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.controlBtn} onPress={handleDownloadOfflineTiles}>
-          <Text style={styles.controlBtnIcon}>📥</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Google Maps Style Bottom Floating Sheet for Full Screen */}
+      {isFullScreen ? (
+        <View style={styles.googleMapsBottomSheet}>
+          <View style={styles.bottomSheetHandle} />
+          <View style={styles.bottomSheetHeaderRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bottomSheetTitle}>{targetName}</Text>
+              <Text style={styles.bottomSheetCoords}>
+                📍 {latitude.toFixed(5)}, {longitude.toFixed(5)} • ±{accuracy ? accuracy.toFixed(1) : '5'}m
+              </Text>
+            </View>
+            <View style={styles.bottomSheetBadge}>
+              <View style={styles.livePulseDot} />
+              <Text style={styles.bottomSheetBadgeText}>LIVE GPS</Text>
+            </View>
+          </View>
+
+          {/* Quick Action Button Row */}
+          <View style={styles.bottomSheetActionRow}>
+            {onOpenARView && (
+              <TouchableOpacity style={[styles.bottomSheetBtn, { backgroundColor: COLORS.accentRedBg, borderColor: COLORS.accentRed }]} onPress={onOpenARView}>
+                <Text style={styles.bottomSheetBtnIcon}>📷</Text>
+                <Text style={[styles.bottomSheetBtnText, { color: '#FFF' }]}>AR Vision</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.bottomSheetBtn} onPress={handleRecenter}>
+              <Text style={styles.bottomSheetBtnIcon}>🎯</Text>
+              <Text style={styles.bottomSheetBtnText}>Recenter</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.bottomSheetBtn} onPress={handleToggleStyle}>
+              <Text style={styles.bottomSheetBtnIcon}>{isDarkMode ? '🌙' : '☀️'}</Text>
+              <Text style={styles.bottomSheetBtnText}>{isDarkMode ? 'Dark' : 'Streets'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.bottomSheetBtn} onPress={handleDownloadOfflineTiles}>
+              <Text style={styles.bottomSheetBtnIcon}>📥</Text>
+              <Text style={styles.bottomSheetBtnText}>Offline Pack</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        /* Interactive Map Control Floating Action Buttons for Embedded Preview */
+        <View style={styles.controlsContainer}>
+          {onOpenARView && (
+            <TouchableOpacity style={[styles.controlBtn, { backgroundColor: COLORS.accentRedBg, borderColor: COLORS.accentRed }]} onPress={onOpenARView}>
+              <Text style={styles.controlBtnIcon}>📷</Text>
+            </TouchableOpacity>
+          )}
+          {onExpandFullScreen && (
+            <TouchableOpacity style={styles.controlBtn} onPress={onExpandFullScreen}>
+              <Text style={styles.controlBtnIcon}>⛶</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.controlBtn} onPress={handleRecenter}>
+            <Text style={styles.controlBtnIcon}>🎯</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.controlBtn} onPress={handleToggleStyle}>
+            <Text style={styles.controlBtnIcon}>{isDarkMode ? '🌙' : '☀️'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.controlBtn} onPress={handleDownloadOfflineTiles}>
+            <Text style={styles.controlBtnIcon}>📥</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 };
@@ -287,6 +430,175 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderDark,
     marginVertical: 16,
     position: 'relative',
+  },
+  fullScreenContainer: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+    backgroundColor: '#0F172A',
+  },
+  googleMapsTopBar: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 10 : 12,
+    left: 12,
+    right: 12,
+    zIndex: 99,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  googleMapsBackBtn: {
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.accentCyan,
+    marginRight: 10,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+  },
+  googleMapsBackBtnText: {
+    color: COLORS.accentCyan,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  googleMapsTitleBox: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    borderRadius: 24,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderDark,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+  },
+  googleMapsTitleText: {
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  googleMapsSubtitleText: {
+    color: COLORS.accentCyan,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  googleMapsBottomSheet: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    right: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.96)',
+    borderRadius: 24,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderDark,
+    zIndex: 99,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+  },
+  bottomSheetHandle: {
+    width: 36,
+    height: 4,
+    backgroundColor: COLORS.borderDark,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 10,
+  },
+  bottomSheetHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  bottomSheetTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  bottomSheetCoords: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  bottomSheetBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.accentGreenBg,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.accentGreen,
+  },
+  bottomSheetBadgeText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  bottomSheetActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  bottomSheetBtn: {
+    flex: 1,
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 14,
+    paddingVertical: 10,
+    marginHorizontal: 4,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.borderDark,
+  },
+  bottomSheetBtnIcon: {
+    fontSize: 18,
+    marginBottom: 2,
+  },
+  bottomSheetBtnText: {
+    color: COLORS.textPrimary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  fullScreenContainer: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+    backgroundColor: '#0F172A',
+  },
+  backFloatingBtn: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    zIndex: 99,
+    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.accentCyan,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+  },
+  backFloatingBtnText: {
+    color: COLORS.accentCyan,
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   map: {
     flex: 1,

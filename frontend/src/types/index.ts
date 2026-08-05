@@ -8,7 +8,9 @@ export type ScreenType =
   | 'ADD_CONTACT'
   | 'TRACKER_AUTH'
   | 'TRACKER_DASHBOARD'
-  | 'GOOGLE_PHONE_REGISTER';
+  | 'GOOGLE_PHONE_REGISTER'
+  | 'FULLSCREEN_MAP'
+  | 'AR_VIEW';
 
 export interface UserData {
   id: string;

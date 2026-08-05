@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { io } from 'socket.io-client';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 
-import { apiService, API_BASE_URL } from './src/services/api';
+import { apiService, API_BASE_URL, SafeZone } from './src/services/api';
 import { locationService } from './src/services/locationService';
 import {
   ScreenType,
@@ -29,14 +29,18 @@ import { BindDeviceScreen } from './src/screens/BindDeviceScreen';
 import { AddContactScreen } from './src/screens/AddContactScreen';
 import { TrackerAuthScreen } from './src/screens/TrackerAuthScreen';
 import { TrackerDashboardScreen } from './src/screens/TrackerDashboardScreen';
+import { MapViewComponent } from './src/components/MapViewComponent';
+import { ARViewComponent } from './src/components/ARViewComponent';
 
 const App = () => {
   // Navigation & Session State
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('WELCOME');
+  const [previousScreenForMap, setPreviousScreenForMap] = useState<ScreenType>('DASHBOARD');
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<UserData | null>(null);
   const [devices, setDevices] = useState<BoundDevice[]>([]);
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
+  const [safeZones, setSafeZones] = useState<SafeZone[]>([]);
   const [activeAlert, setActiveAlert] = useState<ApiAlert | null>(null);
 
   // Form States
@@ -427,10 +431,11 @@ const App = () => {
     if (token) {
       const loadInitialData = async () => {
         setLoading(true);
-        const [cRes, dRes, aRes] = await Promise.all([
+        const [cRes, dRes, aRes, zRes] = await Promise.all([
           apiService.getContacts(token),
           apiService.getDevices(token),
           apiService.getActiveAlerts(token),
+          apiService.getSafeZones(token),
         ]);
         setLoading(false);
 
@@ -459,14 +464,68 @@ const App = () => {
         } else {
           setActiveAlert(null);
         }
+
+        if (zRes.success && zRes.data) {
+          setSafeZones(zRes.data);
+        }
       };
       loadInitialData();
     } else {
       setContacts([]);
       setDevices([]);
+      setSafeZones([]);
       setActiveAlert(null);
     }
   }, [token]);
+
+  // Safe Zone Handlers
+  const handleCreateSafeZone = async (zoneName: string, radiusMeters: number) => {
+    if (!token) return;
+    const currentLat = 37.7749;
+    const currentLng = -122.4194;
+
+    setLoading(true);
+    const result = await apiService.createSafeZone(token, {
+      zoneName,
+      latitude: currentLat,
+      longitude: currentLng,
+      radiusMeters,
+    });
+    setLoading(false);
+
+    if (result.success && result.data) {
+      setSafeZones(prev => [result.data!, ...prev]);
+      triggerFeedback(`Safe Zone "${zoneName}" (${radiusMeters}m) created!`, false);
+    } else {
+      triggerFeedback(result.message || 'Failed to create safe zone.');
+    }
+  };
+
+  const handleDeleteSafeZone = async (safeZoneId: string) => {
+    if (!token) return;
+    Alert.alert(
+      'Remove Safe Zone',
+      'Are you sure you want to remove this Safe Zone geofence?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setLoading(true);
+            const result = await apiService.deleteSafeZone(token, safeZoneId);
+            setLoading(false);
+            if (result.success) {
+              setSafeZones(prev => prev.filter(z => z.id !== safeZoneId));
+              triggerFeedback('Safe Zone removed successfully.', false);
+            } else {
+              triggerFeedback(result.message || 'Failed to delete safe zone.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   // Real-Time GPS location tracking using Google Fused Location Provider API & WebSockets
   useEffect(() => {
@@ -814,6 +873,7 @@ const App = () => {
             user={user}
             devices={devices}
             contacts={contacts}
+            safeZones={safeZones}
             activeAlert={activeAlert}
             pulseAnim={pulseAnim}
             loading={loading}
@@ -823,6 +883,12 @@ const App = () => {
             onUploadAmbientAudio={handleUploadAmbientAudio}
             onNavigateBindDevice={() => setCurrentScreen('BIND_DEVICE')}
             onNavigateAddContact={() => setCurrentScreen('ADD_CONTACT')}
+            onNavigateFullScreenMap={() => {
+              setPreviousScreenForMap('DASHBOARD');
+              setCurrentScreen('FULLSCREEN_MAP');
+            }}
+            onCreateSafeZone={handleCreateSafeZone}
+            onDeleteSafeZone={handleDeleteSafeZone}
             onUnbindDevice={handleUnbindDevice}
             onDeleteContact={handleDeleteContact}
           />
@@ -866,11 +932,77 @@ const App = () => {
             trackerAudioPlaying={trackerAudioPlaying}
             audioProgress={audioProgress}
             onToggleAudioPlaying={() => setTrackerAudioPlaying(!trackerAudioPlaying)}
+            onNavigateFullScreenMap={() => {
+              setPreviousScreenForMap('TRACKER_DASHBOARD');
+              setCurrentScreen('FULLSCREEN_MAP');
+            }}
             onDisconnect={() => {
               setCurrentScreen('WELCOME');
               setTrackerInfo(null);
               setTrackerLogs([]);
             }}
+          />
+        )}
+
+        {currentScreen === 'FULLSCREEN_MAP' && (
+          <MapViewComponent
+            latitude={
+              previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
+                ? parseFloat(trackerLogs[0].latitude)
+                : activeAlert && activeAlert.latitude
+                ? parseFloat(String(activeAlert.latitude))
+                : 37.7749
+            }
+            longitude={
+              previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
+                ? parseFloat(trackerLogs[0].longitude)
+                : activeAlert && activeAlert.longitude
+                ? parseFloat(String(activeAlert.longitude))
+                : -122.4194
+            }
+            accuracy={
+              previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0 && trackerLogs[0].accuracy
+                ? parseFloat(trackerLogs[0].accuracy)
+                : 10.0
+            }
+            logs={previousScreenForMap === 'TRACKER_DASHBOARD' ? trackerLogs : []}
+            safeZones={safeZones}
+            targetName={
+              previousScreenForMap === 'TRACKER_DASHBOARD' && trackerInfo
+                ? trackerInfo.targetUser.fullName
+                : user?.fullName || 'Primary Device'
+            }
+            height="100%"
+            isFullScreen={true}
+            onBack={() => setCurrentScreen(previousScreenForMap || 'DASHBOARD')}
+            onOpenARView={() => setCurrentScreen('AR_VIEW')}
+          />
+        )}
+
+        {currentScreen === 'AR_VIEW' && (
+          <ARViewComponent
+            userLatitude={37.7749}
+            userLongitude={-122.4194}
+            targetLatitude={
+              previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
+                ? parseFloat(trackerLogs[0].latitude)
+                : activeAlert && activeAlert.latitude
+                ? parseFloat(String(activeAlert.latitude))
+                : 37.7752
+            }
+            targetLongitude={
+              previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
+                ? parseFloat(trackerLogs[0].longitude)
+                : activeAlert && activeAlert.longitude
+                ? parseFloat(String(activeAlert.longitude))
+                : -122.4190
+            }
+            targetName={
+              previousScreenForMap === 'TRACKER_DASHBOARD' && trackerInfo
+                ? trackerInfo.targetUser.fullName
+                : user?.fullName || 'Target Device'
+            }
+            onBack={() => setCurrentScreen('FULLSCREEN_MAP')}
           />
         )}
       </Animated.View>

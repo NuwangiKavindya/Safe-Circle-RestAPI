@@ -39,6 +39,8 @@
 	<string>SafeCircle requires background location access to broadcast emergency updates to your safety circle even when the app is minimized.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>SafeCircle requires background location access to broadcast emergency updates to your safety circle even when the app is minimized.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>SafeCircle uses the camera for Augmented Reality (AR) final-approach guidance to help locate lost devices in close proximity.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

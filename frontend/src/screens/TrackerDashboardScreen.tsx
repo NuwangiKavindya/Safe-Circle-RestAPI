@@ -16,6 +16,7 @@ interface TrackerDashboardScreenProps {
   audioProgress: number;
   onToggleAudioPlaying: () => void;
   onDisconnect: () => void;
+  onNavigateFullScreenMap?: () => void;
 }
 
 export const TrackerDashboardScreen: React.FC<TrackerDashboardScreenProps> = ({
@@ -25,6 +26,7 @@ export const TrackerDashboardScreen: React.FC<TrackerDashboardScreenProps> = ({
   audioProgress,
   onToggleAudioPlaying,
   onDisconnect,
+  onNavigateFullScreenMap,
 }) => {
   if (!trackerInfo) return null;
 
@@ -71,7 +73,17 @@ export const TrackerDashboardScreen: React.FC<TrackerDashboardScreenProps> = ({
       </View>
 
       {/* Interactive Native Map Visualization */}
-      <Text style={[globalStyles.inputLabel, { marginTop: 8 }]}>Native Map Location Stream</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, marginBottom: 4 }}>
+        <Text style={globalStyles.inputLabel}>Native Map Location Stream</Text>
+        {onNavigateFullScreenMap && (
+          <TouchableOpacity
+            style={{ paddingVertical: 4, paddingHorizontal: 12, borderRadius: 12, backgroundColor: COLORS.indigoBg, borderWidth: 1, borderColor: COLORS.accentCyan }}
+            onPress={onNavigateFullScreenMap}
+          >
+            <Text style={{ color: COLORS.accentCyan, fontSize: 12, fontWeight: '700' }}>⛶ Fullscreen</Text>
+          </TouchableOpacity>
+        )}
+      </View>
       <MapViewComponent
         latitude={currentLat}
         longitude={currentLng}
@@ -79,6 +91,7 @@ export const TrackerDashboardScreen: React.FC<TrackerDashboardScreenProps> = ({
         logs={trackerLogs}
         targetName={trackerInfo.targetUser.fullName}
         height={320}
+        onExpandFullScreen={onNavigateFullScreenMap}
       />
 
       {/* Ambient SOS Audio Card */}
