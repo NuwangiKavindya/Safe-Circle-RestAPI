@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Animated, Platform, Alert } from 'react-native';
+import { Animated, Platform, Alert, Modal, View, Text, TouchableOpacity, Vibration } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { io } from 'socket.io-client';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 
 import { apiService, API_BASE_URL, SafeZone } from './src/services/api';
-import { locationService } from './src/services/locationService';
+import { locationService, LocationCoordinates } from './src/services/locationService';
+import { motionService, SensitivityMode } from './src/services/motionService';
 import {
   ScreenType,
   UserData,
@@ -41,7 +42,17 @@ const App = () => {
   const [devices, setDevices] = useState<BoundDevice[]>([]);
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
   const [safeZones, setSafeZones] = useState<SafeZone[]>([]);
+  const [liveLocation, setLiveLocation] = useState<LocationCoordinates | null>(null);
   const [activeAlert, setActiveAlert] = useState<ApiAlert | null>(null);
+  const [isMotionGuardActive, setIsMotionGuardActive] = useState<boolean>(false);
+  const [sensitivityMode, setSensitivityMode] = useState<SensitivityMode>('POCKET_GUARD');
+  const [liveEnergyLevel, setLiveEnergyLevel] = useState<number>(0);
+
+  // Grace Countdown Overlay Modal State
+  const [isCountdownModalVisible, setIsCountdownModalVisible] = useState<boolean>(false);
+  const [countdownSeconds, setCountdownSeconds] = useState<number>(5);
+  const [countdownReason, setCountdownReason] = useState<string>('');
+  const countdownTimerRef = useRef<any>(null);
 
   // Form States
   const [contactForm, setContactForm] = useState<ContactFormState>({
@@ -481,8 +492,24 @@ const App = () => {
   // Safe Zone Handlers
   const handleCreateSafeZone = async (zoneName: string, radiusMeters: number) => {
     if (!token) return;
-    const currentLat = 37.7749;
-    const currentLng = -122.4194;
+
+    let currentLat = liveLocation?.latitude;
+    let currentLng = liveLocation?.longitude;
+
+    if (currentLat === undefined || currentLng === undefined || currentLat === null || currentLng === null) {
+      setLoading(true);
+      const loc = await locationService.getCurrentLocation();
+      setLoading(false);
+      if (loc) {
+        currentLat = loc.latitude;
+        currentLng = loc.longitude;
+      }
+    }
+
+    if (currentLat === undefined || currentLng === undefined || currentLat === null || currentLng === null) {
+      triggerFeedback('Could not fetch GPS location to create safe zone. Please enable GPS location services.');
+      return;
+    }
 
     setLoading(true);
     const result = await apiService.createSafeZone(token, {
@@ -527,27 +554,113 @@ const App = () => {
     );
   };
 
+  // Motion Guard Toggle & Sensor Anomaly Handler
+  const handleToggleMotionGuard = (active: boolean) => {
+    if (active) {
+      const started = motionService.startMonitoring(
+        (anomaly) => {
+          // Trigger 5-Second Grace Cancellation Countdown Overlay
+          setCountdownReason(anomaly.reason);
+          setCountdownSeconds(5);
+          setIsCountdownModalVisible(true);
+          try { Vibration.vibrate([0, 500, 200, 500]); } catch (e) {}
+
+          if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = setInterval(() => {
+            setCountdownSeconds((prev) => {
+              if (prev <= 1) {
+                clearInterval(countdownTimerRef.current);
+                setIsCountdownModalVisible(false);
+                triggerSosSignal(); // Auto-fire emergency SOS broadcast if not cancelled!
+                return 0;
+              }
+              try { Vibration.vibrate(200); } catch (e) {}
+              return prev - 1;
+            });
+          }, 1000);
+        },
+        (energyLevel) => {
+          setLiveEnergyLevel(energyLevel);
+        }
+      );
+
+      if (started) {
+        setIsMotionGuardActive(true);
+        triggerFeedback('🛡️ Motion Theft Guard activated at 50Hz sensor rate.', false);
+      } else {
+        setIsMotionGuardActive(false);
+        triggerFeedback('Could not activate motion sensors on this device.');
+      }
+    } else {
+      motionService.stopMonitoring();
+      setIsMotionGuardActive(false);
+      setLiveEnergyLevel(0);
+      triggerFeedback('Motion Theft Guard deactivated.', false);
+    }
+  };
+
+  const handleCancelCountdown = () => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+    }
+    setIsCountdownModalVisible(false);
+    triggerFeedback('Theft alert cancelled by user (False Alarm).', false);
+  };
+
+  const handleSelectSensitivityMode = (mode: SensitivityMode) => {
+    setSensitivityMode(mode);
+    motionService.setSensitivityMode(mode);
+    triggerFeedback(`Sensitivity updated to ${mode.replace('_', ' ')}`, false);
+  };
+
+  const handleCalibrateBaseline = () => {
+    triggerFeedback('🎯 Calibrating 3-second baseline... Keep device still / walking normally', false);
+    motionService.calibrateUserBaseline((offset) => {
+      triggerFeedback(`✅ Baseline calibrated! Offset: ${offset} m/s²`, false);
+    });
+  };
+
+  // Fetch current GPS position on demand
+  const handleFetchCurrentLocation = async () => {
+    setLoading(true);
+    const loc = await locationService.getCurrentLocation();
+    setLoading(false);
+    if (loc) {
+      setLiveLocation(loc);
+      if (socketRef.current && socketRef.current.connected) {
+        socketRef.current.emit('location_update', {
+          deviceId: devices[0]?.id || 'primary-device',
+          ...loc,
+        });
+      }
+      triggerFeedback(`📍 Current Location updated: ${loc.latitude.toFixed(5)}, ${loc.longitude.toFixed(5)}`, false);
+    } else {
+      triggerFeedback('Could not fetch current location. Please check device GPS permissions.');
+    }
+  };
+
   // Real-Time GPS location tracking using Google Fused Location Provider API & WebSockets
   useEffect(() => {
-    if (token && currentScreen === 'DASHBOARD' && devices.length > 0) {
-      const primaryDevice = devices[0];
-      if (primaryDevice && primaryDevice.id) {
-        console.log(`[Fused Location Provider] Initializing live GPS tracking for device: ${primaryDevice.deviceName} (ID: ${primaryDevice.id})`);
-        
-        // Ensure Socket.IO client instance exists for socket emission
-        if (!socketRef.current) {
-          socketRef.current = io(API_BASE_URL, {
-            transports: ['websocket'],
-            forceNew: true,
-          });
-        }
-
-        locationService.startLocationTracking(
-          primaryDevice.id,
-          token,
-          socketRef.current
-        );
+    if (token && currentScreen === 'DASHBOARD') {
+      const targetDeviceId = devices.length > 0 && devices[0].id ? devices[0].id : 'primary-device';
+      console.log(`[Fused Location Provider] Initializing live GPS tracking for device ID: ${targetDeviceId}`);
+      
+      // Ensure Socket.IO client instance exists for socket emission
+      if (!socketRef.current) {
+        socketRef.current = io(API_BASE_URL, {
+          transports: ['websocket'],
+          forceNew: true,
+        });
       }
+
+      locationService.startLocationTracking(
+        targetDeviceId,
+        token,
+        socketRef.current,
+        (location) => {
+          setLiveLocation(location);
+        }
+      );
     } else {
       locationService.stopLocationTracking();
     }
@@ -624,15 +737,25 @@ const App = () => {
   const triggerSosSignal = async () => {
     if (!token) return;
 
-    const mockLat = 37.7749 + (Math.random() - 0.5) * 0.01;
-    const mockLng = -122.4194 + (Math.random() - 0.5) * 0.01;
+    let sosLat = liveLocation?.latitude;
+    let sosLng = liveLocation?.longitude;
+
+    if (sosLat === undefined || sosLng === undefined || sosLat === null || sosLng === null) {
+      setLoading(true);
+      const loc = await locationService.getCurrentLocation();
+      setLoading(false);
+      if (loc) {
+        sosLat = loc.latitude;
+        sosLng = loc.longitude;
+      }
+    }
 
     setLoading(true);
     const result = await apiService.triggerAlert(token, {
       alertType: 'SOS',
       deviceId: devices[0]?.id || undefined,
-      latitude: mockLat,
-      longitude: mockLng,
+      latitude: sosLat !== undefined && sosLat !== null ? sosLat : undefined,
+      longitude: sosLng !== undefined && sosLng !== null ? sosLng : undefined,
     });
     setLoading(false);
 
@@ -875,6 +998,10 @@ const App = () => {
             contacts={contacts}
             safeZones={safeZones}
             activeAlert={activeAlert}
+            liveLocation={liveLocation}
+            isMotionGuardActive={isMotionGuardActive}
+            sensitivityMode={sensitivityMode}
+            liveEnergyLevel={liveEnergyLevel}
             pulseAnim={pulseAnim}
             loading={loading}
             onLogOut={handleLogOut}
@@ -887,12 +1014,89 @@ const App = () => {
               setPreviousScreenForMap('DASHBOARD');
               setCurrentScreen('FULLSCREEN_MAP');
             }}
+            onFetchCurrentLocation={handleFetchCurrentLocation}
             onCreateSafeZone={handleCreateSafeZone}
             onDeleteSafeZone={handleDeleteSafeZone}
+            onToggleMotionGuard={handleToggleMotionGuard}
+            onSelectSensitivityMode={handleSelectSensitivityMode}
+            onCalibrateBaseline={handleCalibrateBaseline}
             onUnbindDevice={handleUnbindDevice}
             onDeleteContact={handleDeleteContact}
           />
         )}
+
+        {/* Grace Cancellation Emergency Countdown Overlay Modal */}
+        <Modal
+          visible={isCountdownModalVisible}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={handleCancelCountdown}
+        >
+          <View style={{
+            flex: 1,
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 24,
+          }}>
+            <View style={{
+              width: '100%',
+              backgroundColor: '#7F1D1D',
+              borderRadius: 24,
+              padding: 28,
+              alignItems: 'center',
+              borderWidth: 2,
+              borderColor: '#EF4444',
+            }}>
+              <Text style={{ fontSize: 48, marginBottom: 8 }}>🚨</Text>
+              <Text style={{ color: '#FFF', fontSize: 22, fontWeight: '900', textAlign: 'center', marginBottom: 6 }}>
+                THEFT ANOMALY DETECTED!
+              </Text>
+              <Text style={{ color: '#FCA5A5', fontSize: 13, textAlign: 'center', marginBottom: 20, lineHeight: 18 }}>
+                {countdownReason || 'Uncharacteristic violent snatch pattern detected.'}
+              </Text>
+
+              {/* Pulsing Seconds Number Circle */}
+              <View style={{
+                width: 90,
+                height: 90,
+                borderRadius: 45,
+                backgroundColor: '#EF4444',
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: 20,
+                borderWidth: 4,
+                borderColor: '#FFF',
+              }}>
+                <Text style={{ color: '#FFF', fontSize: 44, fontWeight: '900' }}>
+                  {countdownSeconds}
+                </Text>
+              </View>
+
+              <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600', marginBottom: 24, textAlign: 'center' }}>
+                Broadcasting Emergency SOS to Safety Circle in {countdownSeconds} seconds...
+              </Text>
+
+              {/* Cancel False Alarm Button */}
+              <TouchableOpacity
+                style={{
+                  width: '100%',
+                  backgroundColor: '#0F172A',
+                  paddingVertical: 16,
+                  borderRadius: 14,
+                  alignItems: 'center',
+                  borderWidth: 2,
+                  borderColor: '#38BDF8',
+                }}
+                onPress={handleCancelCountdown}
+              >
+                <Text style={{ color: '#38BDF8', fontSize: 16, fontWeight: '800' }}>
+                  ✋ CANCEL ALERT (False Alarm)
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         {currentScreen === 'BIND_DEVICE' && (
           <BindDeviceScreen
@@ -949,16 +1153,20 @@ const App = () => {
             latitude={
               previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
                 ? parseFloat(trackerLogs[0].latitude)
+                : liveLocation?.latitude
+                ? liveLocation.latitude
                 : activeAlert && activeAlert.latitude
                 ? parseFloat(String(activeAlert.latitude))
-                : 37.7749
+                : null
             }
             longitude={
               previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
                 ? parseFloat(trackerLogs[0].longitude)
+                : liveLocation?.longitude
+                ? liveLocation.longitude
                 : activeAlert && activeAlert.longitude
                 ? parseFloat(String(activeAlert.longitude))
-                : -122.4194
+                : null
             }
             accuracy={
               previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0 && trackerLogs[0].accuracy
@@ -981,21 +1189,21 @@ const App = () => {
 
         {currentScreen === 'AR_VIEW' && (
           <ARViewComponent
-            userLatitude={37.7749}
-            userLongitude={-122.4194}
+            userLatitude={liveLocation?.latitude ?? null}
+            userLongitude={liveLocation?.longitude ?? null}
             targetLatitude={
               previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
                 ? parseFloat(trackerLogs[0].latitude)
                 : activeAlert && activeAlert.latitude
                 ? parseFloat(String(activeAlert.latitude))
-                : 37.7752
+                : null
             }
             targetLongitude={
               previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
                 ? parseFloat(trackerLogs[0].longitude)
                 : activeAlert && activeAlert.longitude
                 ? parseFloat(String(activeAlert.longitude))
-                : -122.4190
+                : null
             }
             targetName={
               previousScreenForMap === 'TRACKER_DASHBOARD' && trackerInfo

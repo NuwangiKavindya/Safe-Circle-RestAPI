@@ -7,13 +7,17 @@ import {
   TouchableOpacity,
   Animated,
   StyleSheet,
+  Switch,
 } from 'react-native';
 import { DeviceCard } from '../components/DeviceCard';
 import { ContactCard } from '../components/ContactCard';
 import { MapViewComponent } from '../components/MapViewComponent';
 import { UserData, BoundDevice, TrustedContact, ApiAlert } from '../types';
 import { SafeZone } from '../services/api';
+import { LocationCoordinates } from '../services/locationService';
 import { globalStyles, COLORS } from '../styles/theme';
+
+import { SensitivityMode, SENSITIVITY_PROFILES } from '../services/motionService';
 
 interface DashboardScreenProps {
   user: UserData | null;
@@ -21,6 +25,10 @@ interface DashboardScreenProps {
   contacts: TrustedContact[];
   safeZones?: SafeZone[];
   activeAlert: ApiAlert | null;
+  liveLocation?: LocationCoordinates | null;
+  isMotionGuardActive?: boolean;
+  sensitivityMode?: SensitivityMode;
+  liveEnergyLevel?: number;
   pulseAnim: Animated.Value;
   loading: boolean;
   onLogOut: () => void;
@@ -30,8 +38,12 @@ interface DashboardScreenProps {
   onNavigateBindDevice: () => void;
   onNavigateAddContact: () => void;
   onNavigateFullScreenMap?: () => void;
+  onFetchCurrentLocation?: () => void;
   onCreateSafeZone?: (zoneName: string, radiusMeters: number) => void;
   onDeleteSafeZone?: (safeZoneId: string) => void;
+  onToggleMotionGuard?: (active: boolean) => void;
+  onSelectSensitivityMode?: (mode: SensitivityMode) => void;
+  onCalibrateBaseline?: () => void;
   onUnbindDevice: (deviceId: string) => void;
   onDeleteContact: (contactId: string) => void;
 }
@@ -42,6 +54,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   contacts,
   safeZones = [],
   activeAlert,
+  liveLocation,
+  isMotionGuardActive = false,
+  sensitivityMode = 'POCKET_GUARD',
+  liveEnergyLevel = 0,
   pulseAnim,
   loading,
   onLogOut,
@@ -51,8 +67,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onNavigateBindDevice,
   onNavigateAddContact,
   onNavigateFullScreenMap,
+  onFetchCurrentLocation,
   onCreateSafeZone,
   onDeleteSafeZone,
+  onToggleMotionGuard,
+  onSelectSensitivityMode,
+  onCalibrateBaseline,
   onUnbindDevice,
   onDeleteContact,
 }) => {
@@ -68,9 +88,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     }
   };
 
-  // Use mock primary location coords for map preview on user dashboard
-  const primaryLat = activeAlert && activeAlert.latitude ? parseFloat(String(activeAlert.latitude)) : 37.7749;
-  const primaryLng = activeAlert && activeAlert.longitude ? parseFloat(String(activeAlert.longitude)) : -122.4194;
+  // Real-time live location coordinates with fallback to active alert
+  const primaryLat = liveLocation?.latitude
+    ? liveLocation.latitude
+    : activeAlert && activeAlert.latitude
+    ? parseFloat(String(activeAlert.latitude))
+    : null;
+
+  const primaryLng = liveLocation?.longitude
+    ? liveLocation.longitude
+    : activeAlert && activeAlert.longitude
+    ? parseFloat(String(activeAlert.longitude))
+    : null;
+
+  const activeProfile = SENSITIVITY_PROFILES[sensitivityMode] || SENSITIVITY_PROFILES.POCKET_GUARD;
 
   return (
     <ScrollView contentContainerStyle={globalStyles.scrollContent}>
@@ -92,6 +123,125 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           <Text style={styles.profileSummaryText}>📱 {user.phoneNumber}</Text>
         ) : (
           <Text style={styles.profileSummaryText}>🌐 Logged in with Google</Text>
+        )}
+      </View>
+
+      {/* Motion Sensor Theft Protection Center Card */}
+      <View style={[styles.profileSummaryCard, { backgroundColor: '#1E1B4B', borderColor: '#4F46E5', marginTop: 12 }]}>
+        {/* Top Header & Switch Toggle */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <View style={{ flex: 1, marginRight: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={{ color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' }}>
+                🛡️ Motion Theft Guard
+              </Text>
+              <View style={{
+                marginLeft: 8,
+                paddingVertical: 2,
+                paddingHorizontal: 8,
+                borderRadius: 10,
+                backgroundColor: isMotionGuardActive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(148, 163, 184, 0.2)',
+                borderWidth: 1,
+                borderColor: isMotionGuardActive ? COLORS.accentGreen : '#64748B',
+              }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: isMotionGuardActive ? COLORS.accentGreen : COLORS.textSecondary }}>
+                  {isMotionGuardActive ? 'ACTIVE' : 'OFF'}
+                </Text>
+              </View>
+            </View>
+            <Text style={{ color: COLORS.textSecondary, fontSize: 12, marginTop: 2 }}>
+              {isMotionGuardActive
+                ? `50Hz Motion Stream • Profile: ${activeProfile.icon} ${activeProfile.label}`
+                : 'Tap switch to enable real-time motion anomaly protection'}
+            </Text>
+          </View>
+          <Switch
+            value={isMotionGuardActive}
+            onValueChange={onToggleMotionGuard}
+            trackColor={{ false: '#334155', true: COLORS.accentGreen }}
+            thumbColor={isMotionGuardActive ? '#FFF' : '#94A3B8'}
+          />
+        </View>
+
+        {/* Live Motion Energy Meter Bar (Visible when active) */}
+        {isMotionGuardActive && (
+          <View style={{ marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.1)' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <Text style={{ color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' }}>
+                LIVE MOTION ENERGY METER
+              </Text>
+              <Text style={{
+                color: liveEnergyLevel > 70 ? COLORS.accentRed : liveEnergyLevel > 35 ? '#FBBF24' : COLORS.accentGreen,
+                fontSize: 11,
+                fontWeight: '700',
+              }}>
+                {liveEnergyLevel}% {liveEnergyLevel > 70 ? '⚠️ HIGH SPIKE' : liveEnergyLevel > 35 ? '⚡ ACTIVE' : 'NORMAL'}
+              </Text>
+            </View>
+            
+            {/* Energy Progress Bar Track */}
+            <View style={{ height: 6, backgroundColor: '#334155', borderRadius: 3, overflow: 'hidden' }}>
+              <View style={{
+                height: '100%',
+                width: `${Math.min(100, Math.max(5, liveEnergyLevel))}%`,
+                backgroundColor: liveEnergyLevel > 70 ? COLORS.accentRed : liveEnergyLevel > 35 ? '#FBBF24' : COLORS.accentGreen,
+                borderRadius: 3,
+              }} />
+            </View>
+
+            {/* Sensitivity Profile Selection Pills */}
+            <Text style={{ color: COLORS.textSecondary, fontSize: 11, fontWeight: '600', marginTop: 12, marginBottom: 8 }}>
+              SENSITIVITY MODE PROFILE
+            </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              {(['TABLE_GUARD', 'POCKET_GUARD', 'ACTIVE_GUARD'] as SensitivityMode[]).map((mode) => {
+                const profile = SENSITIVITY_PROFILES[mode];
+                const isSelected = sensitivityMode === mode;
+                return (
+                  <TouchableOpacity
+                    key={mode}
+                    style={{
+                      flex: 1,
+                      marginHorizontal: 3,
+                      paddingVertical: 8,
+                      paddingHorizontal: 6,
+                      borderRadius: 10,
+                      alignItems: 'center',
+                      backgroundColor: isSelected ? COLORS.indigoBorder : '#0F172A',
+                      borderWidth: 1,
+                      borderColor: isSelected ? COLORS.accentCyan : '#334155',
+                    }}
+                    onPress={() => onSelectSensitivityMode && onSelectSensitivityMode(mode)}
+                  >
+                    <Text style={{ fontSize: 14 }}>{profile.icon}</Text>
+                    <Text style={{ color: isSelected ? '#FFF' : COLORS.textSecondary, fontSize: 10, fontWeight: '700', marginTop: 2 }}>
+                      {profile.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Calibrate Baseline Button */}
+            {onCalibrateBaseline && (
+              <TouchableOpacity
+                style={{
+                  marginTop: 10,
+                  paddingVertical: 8,
+                  borderRadius: 8,
+                  backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                  borderWidth: 1,
+                  borderColor: COLORS.accentCyan,
+                  alignItems: 'center',
+                }}
+                onPress={onCalibrateBaseline}
+              >
+                <Text style={{ color: COLORS.accentCyan, fontSize: 12, fontWeight: '700' }}>
+                  🎯 Calibrate Personal Motion Baseline
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
         )}
       </View>
 
@@ -164,9 +314,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionHeading}>Live Geolocation Map</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {onFetchCurrentLocation && (
+              <TouchableOpacity
+                style={[styles.addButtonMini, { marginRight: 6, backgroundColor: COLORS.cardBg, borderColor: COLORS.accentGreen }]}
+                onPress={onFetchCurrentLocation}
+              >
+                <Text style={[styles.addButtonMiniText, { color: COLORS.accentGreen }]}>📍 My Location</Text>
+              </TouchableOpacity>
+            )}
             {onNavigateFullScreenMap && (
               <TouchableOpacity
-                style={[styles.addButtonMini, { marginRight: 8, backgroundColor: COLORS.indigoBg, borderColor: COLORS.accentCyan }]}
+                style={[styles.addButtonMini, { marginRight: 6, backgroundColor: COLORS.indigoBg, borderColor: COLORS.accentCyan }]}
                 onPress={onNavigateFullScreenMap}
               >
                 <Text style={[styles.addButtonMiniText, { color: COLORS.accentCyan }]}>⛶ Fullscreen</Text>
@@ -182,10 +340,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           latitude={primaryLat}
           longitude={primaryLng}
           accuracy={10.0}
-          logs={[
-            { latitude: primaryLat, longitude: primaryLng, timestamp: new Date().toISOString() },
-            { latitude: primaryLat + 0.002, longitude: primaryLng + 0.002, timestamp: new Date(Date.now() - 30000).toISOString() },
-          ]}
+          logs={
+            primaryLat !== null && primaryLng !== null
+              ? [{ latitude: primaryLat, longitude: primaryLng, timestamp: new Date().toISOString() }]
+              : []
+          }
           safeZones={safeZones}
           targetName={user?.fullName || 'Primary Device'}
           height={260}
@@ -450,6 +609,17 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
+  },
+  deviceListItem: {
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: COLORS.borderDark,
   },
   emptyTextIcon: {
     fontSize: 32,

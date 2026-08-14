@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Platform, DimensionValue } from 'react-native';
 import {
   Map,
   Camera,
   Marker,
+  UserLocation,
   GeoJSONSource,
   Layer,
   CameraRef,
@@ -29,7 +30,7 @@ interface MapViewComponentProps {
   logs?: LocationLog[];
   safeZones?: SafeZone[];
   targetName?: string;
-  height?: number | string;
+  height?: DimensionValue;
   isFullScreen?: boolean;
   onBack?: () => void;
   onExpandFullScreen?: () => void;
@@ -56,6 +57,7 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
   onExpandFullScreen,
   onOpenARView,
 }) => {
+  // CRITICAL: cameraRef attached directly to <Camera ref={cameraRef} />
   const cameraRef = useRef<CameraRef>(null);
   const [currentStyle, setCurrentStyle] = useState<string>(MAP_STYLES.DARK);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
@@ -94,7 +96,6 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
     );
     isFinalApproach = proximityDistance <= 15.0;
   } else if (latitude !== null && longitude !== null) {
-    // If no separate tracker coordinates provided, simulate proximity for demonstration if accuracy < 15
     proximityDistance = 8.5; // Demo proximity within 15 meters for visualization test
     isFinalApproach = true;
   }
@@ -121,13 +122,51 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
     }
   }, [isFinalApproach, radarAnim]);
 
+  /**
+   * 3. MAPLIBRE CAMERA REF RE-CENTERING METHOD
+   * Strictly invokes setCamera on cameraRef (attached directly to <Camera ref={cameraRef} />)
+   * Prevents 'undefined is not a function' runtime error
+   */
+  const handleRecenter = () => {
+    if (!cameraRef.current) return;
+
+    const cameraConfig = {
+      centerCoordinate: [longitude as number, latitude as number],
+      zoomLevel: isFinalApproach ? 13 : 11.5,
+      animationDuration: 800,
+    };
+
+    // Safe invocation checking setCamera, setStop, or flyTo methods
+    if (typeof (cameraRef.current as any).setCamera === 'function') {
+      (cameraRef.current as any).setCamera(cameraConfig);
+    } else if (typeof (cameraRef.current as any).setStop === 'function') {
+      (cameraRef.current as any).setStop({
+        centerCoordinate: [longitude as number, latitude as number],
+        zoomLevel: isFinalApproach ? 13 : 11.5,
+        duration: 800,
+      });
+    } else if (typeof (cameraRef.current as any).flyTo === 'function') {
+      (cameraRef.current as any).flyTo([longitude as number, latitude as number], 800);
+    }
+  };
+
+  /**
+   * AUTOMATIC CAMERA RE-CENTERING ON LOAD & COORDINATE RESOLUTION
+   * Triggers handleRecenter() when coordinates are first resolved or updated
+   */
+  useEffect(() => {
+    if (latitude !== null && longitude !== null && !isNaN(latitude) && !isNaN(longitude)) {
+      handleRecenter();
+    }
+  }, [latitude, longitude, isFinalApproach]);
+
   if (latitude === null || longitude === null || isNaN(latitude) || isNaN(longitude)) {
     return (
       <View style={[styles.placeholderContainer, { height }]}>
         <Text style={styles.placeholderIcon}>🛰️</Text>
         <Text style={styles.placeholderTitle}>Acquiring Geolocation Fix...</Text>
         <Text style={styles.placeholderSubtitle}>
-          Connecting to device GPS & WebSocket channel
+          Ensure device GPS / Location services are turned on.
         </Text>
       </View>
     );
@@ -170,7 +209,7 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
       const y = distanceY * Math.sin(theta);
       coords.push([centerLng + x, centerLat + y]);
     }
-    coords.push(coords[0]);
+    coords.push(coords[0]); // Close polygon loop
 
     return {
       type: 'Feature',
@@ -182,24 +221,20 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
     };
   });
 
-  const safeZoneGeoJSON: GeoJSON.FeatureCollection<GeoJSON.Polygon> = {
+  const safeZonesGeoJSON: GeoJSON.FeatureCollection<GeoJSON.Polygon> = {
     type: 'FeatureCollection',
     features: safeZoneFeatures,
   };
 
-  // Recenter map camera on target device pin
-  const handleRecenter = () => {
-    cameraRef.current?.flyTo({
-      center: [longitude, latitude],
-      zoom: 17,
-      duration: 1200,
-    });
-  };
-
   // Toggle map basemap style between Dark Mode and Standard Street Mode
   const handleToggleStyle = () => {
-    setIsDarkMode(!isDarkMode);
-    setCurrentStyle(!isDarkMode ? MAP_STYLES.DARK : MAP_STYLES.STREETS);
+    if (isDarkMode) {
+      setCurrentStyle(MAP_STYLES.STREETS);
+      setIsDarkMode(false);
+    } else {
+      setCurrentStyle(MAP_STYLES.DARK);
+      setIsDarkMode(true);
+    }
   };
 
   // Trigger MapLibre OfflineManager Vector Tile Download
@@ -261,6 +296,7 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
         </View>
       )}
 
+      {/* MapLibre Map View Container */}
       <Map
         style={styles.map}
         mapStyle={currentStyle}
@@ -268,12 +304,17 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
         attribution={false}
         androidView="texture"
       >
+        {/* CRITICAL: cameraRef attached directly to <Camera ref={cameraRef} /> centered on device */}
         <Camera
           ref={cameraRef}
-          center={[longitude, latitude]}
-          zoom={isFinalApproach ? 17 : 15}
-          duration={1500}
+          initialViewState={{
+            centerCoordinate: [longitude, latitude],
+            zoomLevel: 11.5,
+          } as any}
         />
+
+        {/* 4. USER LOCATION MARKER */}
+        <UserLocation animated={true} />
 
         {/* Live Target Location Marker Pin with Pulsing Radar Ring */}
         <Marker id="target-device-pin" lngLat={[longitude, latitude]}>
@@ -309,7 +350,7 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
 
         {/* Active Safe Zones Geofence Circles */}
         {safeZoneFeatures.length > 0 && (
-          <GeoJSONSource id="safezones-source" data={safeZoneGeoJSON}>
+          <GeoJSONSource id="safezones-source" data={safeZonesGeoJSON}>
             <Layer
               id="safezones-fill"
               type="fill"
@@ -354,7 +395,7 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
         </View>
       )}
 
-      {/* Google Maps Style Bottom Floating Sheet for Full Screen */}
+      {/* FLOATING ACTION BUTTON CONTROLS (INCLUDES 🎯 MY LOCATION RECENTER BUTTON) */}
       {isFullScreen ? (
         <View style={styles.googleMapsBottomSheet}>
           <View style={styles.bottomSheetHandle} />
@@ -371,7 +412,7 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
             </View>
           </View>
 
-          {/* Quick Action Button Row */}
+          {/* Quick Action Button Row with Floating Recenter Action */}
           <View style={styles.bottomSheetActionRow}>
             {onOpenARView && (
               <TouchableOpacity style={[styles.bottomSheetBtn, { backgroundColor: COLORS.accentRedBg, borderColor: COLORS.accentRed }]} onPress={onOpenARView}>
@@ -381,7 +422,7 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
             )}
             <TouchableOpacity style={styles.bottomSheetBtn} onPress={handleRecenter}>
               <Text style={styles.bottomSheetBtnIcon}>🎯</Text>
-              <Text style={styles.bottomSheetBtnText}>Recenter</Text>
+              <Text style={styles.bottomSheetBtnText}>My Location</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.bottomSheetBtn} onPress={handleToggleStyle}>
               <Text style={styles.bottomSheetBtnIcon}>{isDarkMode ? '🌙' : '☀️'}</Text>
@@ -437,6 +478,185 @@ const styles = StyleSheet.create({
     height: '100%',
     position: 'relative',
     backgroundColor: '#0F172A',
+  },
+  map: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  placeholderContainer: {
+    width: '100%',
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderDark,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    marginVertical: 16,
+  },
+  placeholderIcon: {
+    fontSize: 42,
+    marginBottom: 12,
+  },
+  placeholderTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  placeholderSubtitle: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  mapOverlayBadge: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    right: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.borderDark,
+    zIndex: 10,
+  },
+  livePulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.accentGreen,
+    marginRight: 8,
+  },
+  pulseDotRadar: {
+    backgroundColor: COLORS.accentRed,
+  },
+  mapOverlayText: {
+    color: COLORS.textPrimary,
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
+  },
+  controlsContainer: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    flexDirection: 'column',
+    zIndex: 10,
+  },
+  controlBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.cardBg,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: COLORS.borderDark,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  controlBtnIcon: {
+    fontSize: 18,
+  },
+  markerWrapper: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  markerCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.accentCyan,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFF',
+    elevation: 6,
+  },
+  markerCircleRadar: {
+    backgroundColor: COLORS.accentRed,
+  },
+  markerIcon: {
+    fontSize: 18,
+  },
+  radarPulseRing: {
+    position: 'absolute',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(239, 68, 68, 0.35)',
+    borderWidth: 1.5,
+    borderColor: COLORS.accentRed,
+  },
+  finalApproachBanner: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    right: 12,
+    backgroundColor: 'rgba(127, 29, 29, 0.95)',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    zIndex: 90,
+    borderWidth: 1,
+    borderColor: COLORS.accentRed,
+    elevation: 8,
+  },
+  finalApproachTitle: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  finalApproachSubtitle: {
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  cacheProgressBadge: {
+    position: 'absolute',
+    top: 50,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.accentCyan,
+    zIndex: 15,
+  },
+  cacheProgressText: {
+    color: COLORS.textPrimary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  backFloatingBtn: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.accentCyan,
+    zIndex: 99,
+  },
+  backFloatingBtnText: {
+    color: COLORS.accentCyan,
+    fontSize: 12,
+    fontWeight: '800',
   },
   googleMapsTopBar: {
     position: 'absolute',
@@ -569,200 +789,5 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 11,
     fontWeight: '700',
-  },
-  fullScreenContainer: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-    position: 'relative',
-    backgroundColor: '#0F172A',
-  },
-  backFloatingBtn: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    zIndex: 99,
-    backgroundColor: 'rgba(15, 23, 42, 0.92)',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: COLORS.accentCyan,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-  },
-  backFloatingBtnText: {
-    color: COLORS.accentCyan,
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-  map: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  placeholderContainer: {
-    width: '100%',
-    borderRadius: 16,
-    backgroundColor: COLORS.cardBg,
-    borderWidth: 1,
-    borderColor: COLORS.borderDark,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-    marginVertical: 16,
-  },
-  placeholderIcon: {
-    fontSize: 40,
-    marginBottom: 12,
-  },
-  placeholderTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  placeholderSubtitle: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  finalApproachBanner: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: COLORS.accentRedBg,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    zIndex: 20,
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.accentRed,
-  },
-  finalApproachTitle: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  finalApproachSubtitle: {
-    color: '#FCA5A5',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  markerWrapper: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-  },
-  markerCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(239, 68, 68, 0.9)',
-    borderWidth: 2,
-    borderColor: '#FFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  markerCircleRadar: {
-    backgroundColor: '#DC2626',
-    borderColor: '#FCA5A5',
-    borderWidth: 3,
-  },
-  radarPulseRing: {
-    position: 'absolute',
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'rgba(239, 68, 68, 0.35)',
-    borderWidth: 2,
-    borderColor: COLORS.accentRed,
-  },
-  markerIcon: {
-    fontSize: 18,
-  },
-  mapOverlayBadge: {
-    position: 'absolute',
-    top: 48,
-    left: 12,
-    backgroundColor: 'rgba(15, 23, 42, 0.88)',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.borderDark,
-    zIndex: 10,
-  },
-  livePulseDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.accentGreen,
-    marginRight: 8,
-  },
-  pulseDotRadar: {
-    backgroundColor: COLORS.accentRed,
-  },
-  mapOverlayText: {
-    color: COLORS.textPrimary,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  cacheProgressBadge: {
-    position: 'absolute',
-    bottom: 12,
-    left: 12,
-    backgroundColor: COLORS.indigoBg,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: COLORS.indigoBorder,
-    zIndex: 10,
-  },
-  cacheProgressText: {
-    color: COLORS.indigoText,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  controlsContainer: {
-    position: 'absolute',
-    bottom: 12,
-    right: 12,
-    flexDirection: 'column',
-    zIndex: 10,
-  },
-  controlBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(15, 23, 42, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginVertical: 4,
-    borderWidth: 1,
-    borderColor: COLORS.borderDark,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 6,
-  },
-  controlBtnIcon: {
-    fontSize: 18,
   },
 });

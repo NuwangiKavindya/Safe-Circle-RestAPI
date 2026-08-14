@@ -39,13 +39,13 @@ export const ARViewComponent: React.FC<ARViewComponentProps> = ({
   const hasUserCoords = userLatitude !== null && userLongitude !== null;
   const hasTargetCoords = targetLatitude !== null && targetLongitude !== null;
 
-  const lat1 = hasUserCoords ? userLatitude! : 37.7749;
-  const lon1 = hasUserCoords ? userLongitude! : -122.4194;
-  const lat2 = hasTargetCoords ? targetLatitude! : 37.7751;
-  const lon2 = hasTargetCoords ? targetLongitude! : -122.4192;
+  const lat1 = hasUserCoords ? userLatitude! : 0;
+  const lon1 = hasUserCoords ? userLongitude! : 0;
+  const lat2 = hasTargetCoords ? targetLatitude! : 0;
+  const lon2 = hasTargetCoords ? targetLongitude! : 0;
 
-  const distanceMeters = calculateDistanceMeters(lat1, lon1, lat2, lon2);
-  const targetBearing = calculateBearingDegrees(lat1, lon1, lat2, lon2);
+  const distanceMeters = (hasUserCoords && hasTargetCoords) ? calculateDistanceMeters(lat1, lon1, lat2, lon2) : 0;
+  const targetBearing = (hasUserCoords && hasTargetCoords) ? calculateBearingDegrees(lat1, lon1, lat2, lon2) : 0;
 
   // Relative arrow rotation angle (Target bearing minus current phone compass heading)
   const relativeAngle = (targetBearing - deviceHeading + 360) % 360;
