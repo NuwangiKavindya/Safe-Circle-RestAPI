@@ -876,6 +876,40 @@ class ApiService {
       };
     }
   }
+
+  /**
+   * Save / Register FCM Device Token for Push Notifications
+   */
+  async saveFcmToken(token: string, fcmToken: string): Promise<{ success: boolean; message?: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/device/fcm-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ fcmToken }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to save FCM token',
+        };
+      }
+
+      return {
+        success: true,
+        message: data.message,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred while saving FCM token',
+      };
+    }
+  }
 }
 
 export const apiService = new ApiService();

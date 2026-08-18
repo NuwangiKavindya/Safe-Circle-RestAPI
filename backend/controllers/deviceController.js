@@ -1,4 +1,5 @@
 const Device = require('../models/Device');
+const User = require('../models/User');
 
 /**
  * @desc    Bind a new device to the user
@@ -99,6 +100,37 @@ exports.unbindDevice = async (req, res) => {
             success: true,
             message: 'Device successfully unbound',
             data: {}
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+/**
+ * @desc    Update FCM Device Token for user
+ * @route   POST /api/device/fcm-token
+ * @access  Private
+ */
+exports.updateFcmToken = async (req, res) => {
+    try {
+        const { fcmToken } = req.body;
+        if (!fcmToken) {
+            return res.status(400).json({
+                success: false,
+                message: 'fcmToken parameter is required'
+            });
+        }
+
+        await User.update({ fcmToken }, { where: { id: req.user.id } });
+        await Device.update({ fcmToken }, { where: { userId: req.user.id } });
+
+        res.status(200).json({
+            success: true,
+            message: 'FCM token registered successfully',
+            fcmToken
         });
     } catch (error) {
         res.status(500).json({

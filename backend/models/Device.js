@@ -46,6 +46,10 @@ const Device = sequelize.define('Device', {
         validate: {
             notNull: { msg: 'Please add a device OS' },
         }
+    },
+    fcmToken: {
+        type: DataTypes.TEXT,
+        allowNull: true
     }
 }, {
     timestamps: true

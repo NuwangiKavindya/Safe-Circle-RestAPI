@@ -1,17 +1,10 @@
 const nodemailer = require('nodemailer');
+const { sendEmergencyPushNotification } = require('../services/pushService');
+const User = require('../models/User');
 
 // SMS Stub / future twilio setup
 const sendSMS = async (to, message) => {
     console.log(`[Notification - SMS] Sending to ${to}: "${message}"`);
-    
-    // Twilio implementation stub:
-    // const twilio = require('twilio');
-    // const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    // await client.messages.create({
-    //     body: message,
-    //     from: process.env.TWILIO_PHONE_NUMBER,
-    //     to: to
-    // });
 };
 
 // Email sender using Nodemailer
@@ -29,7 +22,7 @@ const sendEmail = async (to, subject, text, html) => {
         const transporter = nodemailer.createTransport({
             host: process.env.SMTP_HOST,
             port: process.env.SMTP_PORT || 587,
-            secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
+            secure: process.env.SMTP_SECURE === 'true',
             auth: {
                 user: process.env.SMTP_USER,
                 pass: process.env.SMTP_PASS,
@@ -86,6 +79,28 @@ const dispatchSosNotifications = async (user, contacts, alert) => {
             `;
             await sendEmail(contact.contactEmail, emailSubject, messageText, emailHtml);
         }
+    }
+
+    // 3. Dispatch FCM Push Notifications to registered contact devices
+    try {
+        const contactEmails = contacts.map(c => c.contactEmail).filter(Boolean);
+        if (contactEmails.length > 0) {
+            const contactUsers = await User.findAll({ where: { email: contactEmails } });
+            const fcmTokens = contactUsers.map(u => u.fcmToken).filter(Boolean);
+            if (fcmTokens.length > 0) {
+                await sendEmergencyPushNotification(fcmTokens, {
+                    ownerName: user.fullName,
+                    message: `${user.fullName} triggered an active SOS alert! Tap to open live tracker.`,
+                    alertId: alert.id,
+                    deviceId: alert.deviceId,
+                    latitude: alert.latitude,
+                    longitude: alert.longitude,
+                    alertType: alert.alertType,
+                });
+            }
+        }
+    } catch (pushErr) {
+        console.error('[Notification - FCM] Error collecting contact FCM tokens:', pushErr.message);
     }
 };
 

@@ -8,6 +8,7 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 import { apiService, API_BASE_URL, SafeZone } from './src/services/api';
 import { locationService, LocationCoordinates } from './src/services/locationService';
 import { motionService, SensitivityMode } from './src/services/motionService';
+import { fcmService } from './src/services/fcmService';
 import {
   ScreenType,
   UserData,
@@ -612,6 +613,15 @@ const App = () => {
     motionService.setSensitivityMode(mode);
     triggerFeedback(`Sensitivity updated to ${mode.replace('_', ' ')}`, false);
   };
+
+  // Initialize FCM Push Notifications when authenticated
+  useEffect(() => {
+    if (token) {
+      fcmService.initialize(token, () => {
+        setCurrentScreen('TRACKER_DASHBOARD');
+      });
+    }
+  }, [token]);
 
   const handleCalibrateBaseline = () => {
     triggerFeedback('🎯 Calibrating 3-second baseline... Keep device still / walking normally', false);

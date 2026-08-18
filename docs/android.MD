@@ -1,0 +1,1 @@
+I am developing this project for Android only. Please keep this in mind.
