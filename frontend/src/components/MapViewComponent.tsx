@@ -9,6 +9,7 @@ import {
   Layer,
   CameraRef,
 } from '@maplibre/maplibre-react-native';
+import { SmoothAnimatedMarker } from './SmoothAnimatedMarker';
 import { calculateDistanceMeters, calculateBearingDegrees } from '../utils/distance';
 import { offlineMapService } from '../services/offlineMapService';
 import { SafeZone } from '../services/api';
@@ -316,22 +317,15 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
         {/* 4. USER LOCATION MARKER */}
         <UserLocation animated={true} />
 
-        {/* Live Target Location Marker Pin with Pulsing Radar Ring */}
-        <Marker id="target-device-pin" lngLat={[longitude, latitude]}>
-          <View style={styles.markerWrapper}>
-            {isFinalApproach && (
-              <Animated.View
-                style={[
-                  styles.radarPulseRing,
-                  { transform: [{ scale: radarAnim }] },
-                ]}
-              />
-            )}
-            <View style={[styles.markerCircle, isFinalApproach && styles.markerCircleRadar]}>
-              <Text style={styles.markerIcon}>📍</Text>
-            </View>
-          </View>
-        </Marker>
+        {/* 60 FPS Smooth Animated Target Location Marker Pin */}
+        <SmoothAnimatedMarker
+          id="target-device-smooth-pin"
+          targetCoordinate={{ latitude, longitude, accuracy: accuracy || undefined }}
+          durationMs={1500}
+          title={targetName}
+          markerColor={isFinalApproach ? COLORS.accentRed : COLORS.accentCyan}
+          showHeadingArrow={true}
+        />
 
         {/* Historical Route Line Layer */}
         {routeCoordinates.length > 1 && (
