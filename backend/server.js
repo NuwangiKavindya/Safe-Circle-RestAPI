@@ -16,6 +16,7 @@ const TrustedContact = require('./models/TrustedContact');
 const LocationLog = require('./models/LocationLog');
 const Alert = require('./models/Alert');
 const SafeZone = require('./models/SafeZone');
+const SusFeedback = require('./models/SusFeedback');
 
 const authRoutes = require('./routes/authRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
@@ -24,6 +25,7 @@ const locationRoutes = require('./routes/locationRoutes');
 const alertRoutes = require('./routes/alertRoutes');
 const verifyRoutes = require('./routes/verifyRoutes');
 const safeZoneRoutes = require('./routes/safeZoneRoutes');
+const susRoutes = require('./routes/susRoutes');
 
 const path = require('path');
 const http = require('http');
@@ -248,6 +250,7 @@ app.use('/api/location', locationRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/contacts/shared', verifyRoutes);
 app.use('/api/geofence', safeZoneRoutes);
+app.use('/api/sus', susRoutes);
 
 // Haversine Distance helper for Geofence evaluation (meters)
 const calculateDistanceMeters = (lat1, lon1, lat2, lon2) => {
