@@ -910,6 +910,40 @@ class ApiService {
       };
     }
   }
+
+  /**
+   * Update User Preferred Emergency Alarm Sound Preference
+   */
+  async updateAlarmSoundPreference(token: string, alarmSound: string): Promise<{ success: boolean; message?: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/alarm-sound`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ alarmSound }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to update alarm sound preference',
+        };
+      }
+
+      return {
+        success: true,
+        message: data.message,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred while updating alarm sound preference',
+      };
+    }
+  }
 }
 
 export const apiService = new ApiService();

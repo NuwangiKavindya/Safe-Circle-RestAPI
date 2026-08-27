@@ -320,7 +320,8 @@ exports.login = async (req, res) => {
                 id: user.id,
                 fullName: user.fullName,
                 email: user.email,
-                phoneNumber: user.phoneNumber
+                phoneNumber: user.phoneNumber,
+                alarmSound: user.alarmSound || 'police_siren'
             }
         });
     } catch (error) {
@@ -328,6 +329,39 @@ exports.login = async (req, res) => {
             success: false,
             message: error.message,
         });
+    }
+};
+
+/**
+ * @desc    Update user alarm sound preference
+ * @route   PUT /api/auth/alarm-sound
+ * @access  Private
+ */
+exports.updateAlarmSound = async (req, res) => {
+    try {
+        const { alarmSound } = req.body;
+        if (!alarmSound) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide an alarmSound ID.'
+            });
+        }
+
+        const user = await User.findByPk(req.user.id);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        user.alarmSound = alarmSound;
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Alarm sound preference updated successfully',
+            alarmSound: user.alarmSound
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
 };
 

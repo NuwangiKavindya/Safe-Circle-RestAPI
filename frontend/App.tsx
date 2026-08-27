@@ -9,6 +9,7 @@ import { apiService, API_BASE_URL, SafeZone } from './src/services/api';
 import { locationService, LocationCoordinates } from './src/services/locationService';
 import { motionService, SensitivityMode } from './src/services/motionService';
 import { fcmService } from './src/services/fcmService';
+import { soundService } from './src/services/soundService';
 import {
   ScreenType,
   UserData,
@@ -565,6 +566,7 @@ const App = () => {
           setCountdownSeconds(5);
           setIsCountdownModalVisible(true);
           try { Vibration.vibrate([0, 500, 200, 500]); } catch (e) {}
+          soundService.getSelectedSound().then(snd => soundService.playSound(snd));
 
           if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
           countdownTimerRef.current = setInterval(() => {
@@ -572,6 +574,7 @@ const App = () => {
               if (prev <= 1) {
                 clearInterval(countdownTimerRef.current);
                 setIsCountdownModalVisible(false);
+                soundService.stopSound();
                 triggerSosSignal(); // Auto-fire emergency SOS broadcast if not cancelled!
                 return 0;
               }
@@ -596,6 +599,7 @@ const App = () => {
       motionService.stopMonitoring();
       setIsMotionGuardActive(false);
       setLiveEnergyLevel(0);
+      soundService.stopSound();
       triggerFeedback('Motion Theft Guard deactivated.', false);
     }
   };
@@ -605,7 +609,8 @@ const App = () => {
       clearInterval(countdownTimerRef.current);
     }
     setIsCountdownModalVisible(false);
-    triggerFeedback('Theft alert cancelled by user (False Alarm).', false);
+    soundService.stopSound();
+    triggerFeedback('Emergency SOS cancelled. Device marked safe.', false);
   };
 
   const handleSelectSensitivityMode = (mode: SensitivityMode) => {
@@ -1004,6 +1009,7 @@ const App = () => {
         {currentScreen === 'DASHBOARD' && (
           <DashboardScreen
             user={user}
+            userToken={token}
             devices={devices}
             contacts={contacts}
             safeZones={safeZones}

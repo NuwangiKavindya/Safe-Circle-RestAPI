@@ -8,10 +8,12 @@ import {
   Animated,
   StyleSheet,
   Switch,
+  Alert,
 } from 'react-native';
 import { DeviceCard } from '../components/DeviceCard';
 import { ContactCard } from '../components/ContactCard';
 import { MapViewComponent } from '../components/MapViewComponent';
+import { AlarmSoundSelectorComponent } from '../components/AlarmSoundSelectorComponent';
 import { UserData, BoundDevice, TrustedContact, ApiAlert } from '../types';
 import { SafeZone } from '../services/api';
 import { LocationCoordinates } from '../services/locationService';
@@ -21,6 +23,7 @@ import { SensitivityMode, SENSITIVITY_PROFILES } from '../services/motionService
 
 interface DashboardScreenProps {
   user: UserData | null;
+  userToken?: string | null;
   devices: BoundDevice[];
   contacts: TrustedContact[];
   safeZones?: SafeZone[];
@@ -50,6 +53,7 @@ interface DashboardScreenProps {
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   user,
+  userToken,
   devices,
   contacts,
   safeZones = [],
@@ -244,6 +248,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           </View>
         )}
       </View>
+
+      {/* Alarm Siren Sound Selector Component */}
+      <AlarmSoundSelectorComponent
+        userToken={userToken}
+        onShowToast={(msg) => Alert.alert('Alarm Preference', msg)}
+      />
 
       {/* Emergency SOS Center */}
       <View style={styles.sosContainer}>

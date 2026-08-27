@@ -65,6 +65,11 @@ const User = sequelize.define('User', {
     fcmToken: {
         type: DataTypes.TEXT,
         allowNull: true
+    },
+    alarmSound: {
+        type: DataTypes.STRING(50),
+        defaultValue: 'police_siren',
+        allowNull: true
     }
 }, {
     timestamps: true,
