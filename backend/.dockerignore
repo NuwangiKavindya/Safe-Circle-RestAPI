@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+.git
+.gitignore
+.agents
+.vscode
+.idea
+*.md
+tests
+coverage
+*.log

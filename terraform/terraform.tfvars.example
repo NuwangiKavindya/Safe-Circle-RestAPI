@@ -1,0 +1,38 @@
+# AWS Region (e.g., ap-south-1, us-east-1, eu-west-1)
+aws_region = "ap-south-1"
+
+# Environment identifier
+environment = "production"
+
+# Project prefix for resource tagging
+project_name = "safe-circle"
+
+# EC2 Instance type
+instance_type = "t3.micro"
+
+# Create a separate dedicated t3.micro EC2 instance for PostgreSQL (true/false)
+create_separate_db_instance = true
+
+# Option A: Provide an existing AWS Key Pair name
+key_name = "safe-circle-key"
+
+# Option B: Or provide your SSH Public Key content directly here (uncomment to use)
+# public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@example.com"
+
+# Restrict SSH access to your specific IP address (e.g., ["203.0.113.25/32"])
+allowed_ssh_cidr = ["0.0.0.0/0"]
+
+# Backend application port
+app_port = 5001
+
+# PostgreSQL Configuration
+db_port     = 5432
+db_name     = "safe_circle"
+db_user     = "safe_circle_user"
+# db_password = "YourSecurePasswordHere123!" # Leave commented out to auto-generate a secure random password
+
+# Root EBS Volume Size in GB
+volume_size = 20
+
+# Swap Space in GB (Recommended: 2GB for t3.micro instances)
+swap_size_gb = 2

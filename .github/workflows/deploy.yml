@@ -1,0 +1,124 @@
+name: Deploy Safe-Circle Backend to AWS EC2
+
+on:
+  push:
+    branches:
+      - production-env
+    paths:
+      - 'backend/**'
+      - 'docker-compose.yml'
+      - 'nginx/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build & Test Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ./backend
+        run: |
+          npm ci
+
+      - name: Verify Backend Syntax
+        working-directory: ./backend
+        run: |
+          node -c server.js
+          node -c config/db.js
+          echo "Node.js syntax validation passed successfully."
+
+  deploy-to-ec2:
+    name: Deploy to AWS EC2
+    needs: build-and-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Execute Remote Deployment via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER || 'ubuntu' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script_stop: true
+          script: |
+            echo "=========================================="
+            echo " Starting Safe-Circle Deployment on EC2"
+            echo "=========================================="
+
+            APP_DIR="/opt/safe-circle"
+
+            # 1. Initialize or update Git repository
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "[INFO] Cloning repository into $APP_DIR..."
+              sudo rm -rf "$APP_DIR"
+              sudo git clone -b ${{ github.ref_name }} https://github.com/${{ github.repository }}.git "$APP_DIR"
+              sudo chown -R ubuntu:ubuntu "$APP_DIR"
+            else
+              echo "[INFO] Pulling latest changes from ${{ github.ref_name }} branch..."
+              cd "$APP_DIR"
+              git fetch --all
+              git checkout ${{ github.ref_name }}
+              git reset --hard origin/${{ github.ref_name }}
+            fi
+
+            cd "$APP_DIR"
+
+            # 2. Generate backend .env file (Only essential secrets required from GitHub)
+            echo "[INFO] Writing backend environment configuration..."
+            cat << 'EOF' > "$APP_DIR/backend/.env"
+            PORT=5001
+            NODE_ENV=production
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_PORT=5432
+            DB_NAME=safe_circle
+            DB_USER=safe_circle_user
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            JWT_EXPIRE_DAYS=30
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID || '' }}
+            GOOGLE_WEB_CLIENT_ID=${{ secrets.GOOGLE_WEB_CLIENT_ID || '' }}
+            GOOGLE_IOS_CLIENT_ID=${{ secrets.GOOGLE_IOS_CLIENT_ID || '' }}
+            GOOGLE_ANDROID_CLIENT_ID=${{ secrets.GOOGLE_ANDROID_CLIENT_ID || '' }}
+            SMTP_HOST=smtp.gmail.com
+            SMTP_PORT=587
+            SMTP_SECURE=false
+            SMTP_USER=${{ secrets.SMTP_USER || '' }}
+            SMTP_PASS=${{ secrets.SMTP_PASS || '' }}
+            SMTP_FROM="SafeCircle Security" <no-reply@safecircle.com>
+            EOF
+
+            # Clean any leading spaces in the generated .env file
+            sed -i 's/^[ \t]*//' "$APP_DIR/backend/.env"
+
+            # 3. Build and restart Docker containers
+            echo "[INFO] Rebuilding and launching Docker containers..."
+            docker compose -f docker-compose.yml down --remove-orphans || true
+            docker compose -f docker-compose.yml up -d --build --remove-orphans
+
+            # 4. Prune unused images to preserve disk space on t3.micro
+            echo "[INFO] Cleaning up dangling docker images..."
+            docker image prune -f
+
+            # 5. Verify deployment health
+            echo "[INFO] Verifying container health..."
+            sleep 10
+            docker compose ps
+            echo "=========================================="
+            echo " Deployment Finished Successfully!"
+            echo "=========================================="
