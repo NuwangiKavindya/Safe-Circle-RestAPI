@@ -89,7 +89,7 @@ jobs:
             DB_NAME=safe_circle
             DB_USER=safe_circle_user
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            JWT_SECRET=${{ secrets.JWT_SECRET || '209fd6ed0d7e0ad73c59ede5b480bb688bc87e90a249fd6db1450f9ea934fd90' }}
             JWT_EXPIRE_DAYS=30
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID || '' }}
             GOOGLE_WEB_CLIENT_ID=${{ secrets.GOOGLE_WEB_CLIENT_ID || '' }}
@@ -100,7 +100,7 @@ jobs:
             SMTP_SECURE=false
             SMTP_USER=${{ secrets.SMTP_USER || '' }}
             SMTP_PASS=${{ secrets.SMTP_PASS || '' }}
-            SMTP_FROM="SafeCircle Security" <no-reply@safecircle.com>
+            SMTP_FROM=no-reply@safecircle.com
             EOF
 
             # Clean any leading spaces in the generated .env file
