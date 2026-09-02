@@ -1,19 +1,31 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Platform, DimensionValue } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Animated,
+  Platform,
+  DimensionValue,
+  TextInput,
+  Alert,
+} from 'react-native';
 import {
   Map,
   Camera,
-  Marker,
   UserLocation,
   GeoJSONSource,
   Layer,
+  Marker,
   CameraRef,
 } from '@maplibre/maplibre-react-native';
 import { SmoothAnimatedMarker } from './SmoothAnimatedMarker';
-import { calculateDistanceMeters, calculateBearingDegrees } from '../utils/distance';
+import { calculateDistanceMeters, calculateBearingDegrees, generateGradientRoute } from '../utils/distance';
 import { offlineMapService } from '../services/offlineMapService';
 import { SafeZone } from '../services/api';
-import { COLORS } from '../styles/theme';
+import { THEME_PALETTES, COLORS } from '../styles/theme';
+import { useTheme } from '../context/ThemeContext';
+import { createGeofencePolygon } from '../utils/geofenceHelper';
 
 interface LocationLog {
   latitude: number | string;
@@ -33,14 +45,16 @@ interface MapViewComponentProps {
   targetName?: string;
   height?: DimensionValue;
   isFullScreen?: boolean;
+  themeMode?: 'dark' | 'light';
   onBack?: () => void;
   onExpandFullScreen?: () => void;
   onOpenARView?: () => void;
+  onCreateSafeZone?: (zoneName: string, radiusMeters: number, latitude: number, longitude: number) => void;
 }
 
 const MAP_STYLES = {
-  DARK: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-  STREETS: 'https://demotiles.maplibre.org/style.json',
+  DARK: THEME_PALETTES.dark.mapStyleUrl,
+  LIGHT: THEME_PALETTES.light.mapStyleUrl,
 };
 
 export const MapViewComponent: React.FC<MapViewComponentProps> = ({
@@ -54,14 +68,19 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
   targetName = 'Target Device',
   height = 340,
   isFullScreen = false,
+  themeMode,
   onBack,
   onExpandFullScreen,
   onOpenARView,
+  onCreateSafeZone,
 }) => {
+  const { isDark: globalIsDark, toggleTheme: globalToggleTheme } = useTheme();
+  const isDarkMode = themeMode ? themeMode === 'dark' : globalIsDark;
+  const activeTheme = isDarkMode ? THEME_PALETTES.dark : THEME_PALETTES.light;
+  const currentStyle = isDarkMode ? MAP_STYLES.DARK : MAP_STYLES.LIGHT;
+
   // CRITICAL: cameraRef attached directly to <Camera ref={cameraRef} />
   const cameraRef = useRef<CameraRef>(null);
-  const [currentStyle, setCurrentStyle] = useState<string>(MAP_STYLES.DARK);
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
   // Offline Caching State
   const [cacheProgress, setCacheProgress] = useState<number | null>(null);
@@ -69,6 +88,12 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
 
   // Radar Animation for Final Approach (< 15 meters)
   const radarAnim = useRef(new Animated.Value(1)).current;
+
+  // Interactive On-Map Geofence Editor States
+  const [isEditorActive, setIsEditorActive] = useState<boolean>(false);
+  const [draftCenter, setDraftCenter] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [draftRadius, setDraftRadius] = useState<number>(250);
+  const [draftZoneName, setDraftZoneName] = useState<string>('');
 
   // Real-time Proximity Calculation
   let proximityDistance: number | null = null;
@@ -126,34 +151,33 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
   /**
    * 3. MAPLIBRE CAMERA REF RE-CENTERING METHOD
    * Strictly invokes setCamera on cameraRef (attached directly to <Camera ref={cameraRef} />)
-   * Prevents 'undefined is not a function' runtime error
    */
-  const handleRecenter = () => {
-    if (!cameraRef.current) return;
+  const handleRecenter = (customZoom?: number | any) => {
+    if (!cameraRef.current || latitude === null || longitude === null || isNaN(latitude) || isNaN(longitude)) return;
+
+    const targetZoom = typeof customZoom === 'number' ? customZoom : (isFinalApproach ? 18.0 : 16.5);
 
     const cameraConfig = {
       centerCoordinate: [longitude as number, latitude as number],
-      zoomLevel: isFinalApproach ? 13 : 11.5,
-      animationDuration: 800,
+      zoomLevel: targetZoom,
+      animationDuration: 1200,
     };
 
-    // Safe invocation checking setCamera, setStop, or flyTo methods
     if (typeof (cameraRef.current as any).setCamera === 'function') {
       (cameraRef.current as any).setCamera(cameraConfig);
     } else if (typeof (cameraRef.current as any).setStop === 'function') {
       (cameraRef.current as any).setStop({
         centerCoordinate: [longitude as number, latitude as number],
-        zoomLevel: isFinalApproach ? 13 : 11.5,
-        duration: 800,
+        zoomLevel: targetZoom,
+        duration: 1200,
       });
     } else if (typeof (cameraRef.current as any).flyTo === 'function') {
-      (cameraRef.current as any).flyTo([longitude as number, latitude as number], 800);
+      (cameraRef.current as any).flyTo([longitude as number, latitude as number], 1200);
     }
   };
 
   /**
    * AUTOMATIC CAMERA RE-CENTERING ON LOAD & COORDINATE RESOLUTION
-   * Triggers handleRecenter() when coordinates are first resolved or updated
    */
   useEffect(() => {
     if (latitude !== null && longitude !== null && !isNaN(latitude) && !isNaN(longitude)) {
@@ -163,34 +187,23 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
 
   if (latitude === null || longitude === null || isNaN(latitude) || isNaN(longitude)) {
     return (
-      <View style={[styles.placeholderContainer, { height }]}>
+      <View style={[styles.placeholderContainer, { height, backgroundColor: activeTheme.cardBg, borderColor: activeTheme.borderDark }]}>
         <Text style={styles.placeholderIcon}>🛰️</Text>
-        <Text style={styles.placeholderTitle}>Acquiring Geolocation Fix...</Text>
-        <Text style={styles.placeholderSubtitle}>
+        <Text style={[styles.placeholderTitle, { color: activeTheme.textPrimary }]}>Acquiring Geolocation Fix...</Text>
+        <Text style={[styles.placeholderSubtitle, { color: activeTheme.textMuted }]}>
           Ensure device GPS / Location services are turned on.
         </Text>
       </View>
     );
   }
 
-  // Construct GeoJSON FeatureCollection for route polyline from historical logs
-  const routeCoordinates: [number, number][] = logs
-    .map(log => [parseFloat(String(log.longitude)), parseFloat(String(log.latitude))] as [number, number])
-    .filter(coord => !isNaN(coord[0]) && !isNaN(coord[1]));
+  // Construct GeoJSON FeatureCollection for directional & speed-gradient route polyline
+  const routeGeoJSON = generateGradientRoute(
+    logs.length > 1
+      ? logs
+      : [{ latitude, longitude, timestamp: new Date().toISOString() }, { latitude: (longitude as number) + 0.0001, longitude: (latitude as number) + 0.0001, timestamp: new Date().toISOString() }] // Fallback dummy segment if insufficient logs
+  );
 
-  const routeGeoJSON: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
-    type: 'FeatureCollection',
-    features: [
-      {
-        type: 'Feature',
-        properties: {},
-        geometry: {
-          type: 'LineString',
-          coordinates: routeCoordinates.length > 0 ? routeCoordinates : [[longitude, latitude]],
-        },
-      },
-    ],
-  };
 
   // Construct GeoJSON Polygon features for Active Safe Zones Geofences
   const safeZoneFeatures: GeoJSON.Feature<GeoJSON.Polygon>[] = safeZones.map((zone) => {
@@ -198,28 +211,7 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
     const centerLat = parseFloat(String(zone.latitude));
     const radiusMeters = parseFloat(String(zone.radiusMeters)) || 200;
 
-    const coords: [number, number][] = [];
-    const km = radiusMeters / 1000;
-    const distanceX = km / (111.32 * Math.cos((centerLat * Math.PI) / 180));
-    const distanceY = km / 110.574;
-    const points = 32;
-
-    for (let i = 0; i < points; i++) {
-      const theta = (i / points) * (2 * Math.PI);
-      const x = distanceX * Math.cos(theta);
-      const y = distanceY * Math.sin(theta);
-      coords.push([centerLng + x, centerLat + y]);
-    }
-    coords.push(coords[0]); // Close polygon loop
-
-    return {
-      type: 'Feature',
-      properties: { name: zone.zoneName },
-      geometry: {
-        type: 'Polygon',
-        coordinates: [coords],
-      },
-    };
+    return createGeofencePolygon(centerLat, centerLng, radiusMeters, zone.zoneName, false);
   });
 
   const safeZonesGeoJSON: GeoJSON.FeatureCollection<GeoJSON.Polygon> = {
@@ -227,15 +219,25 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
     features: safeZoneFeatures,
   };
 
-  // Toggle map basemap style between Dark Mode and Standard Street Mode
+  // Computed Real-Time Draft Geofence GeoJSON for Interactive Visual Editor
+  const draftPolygonGeoJSON: GeoJSON.FeatureCollection<GeoJSON.Polygon> | null = draftCenter
+    ? {
+        type: 'FeatureCollection',
+        features: [
+          createGeofencePolygon(
+            draftCenter.latitude,
+            draftCenter.longitude,
+            draftRadius,
+            draftZoneName || 'New Safe Zone',
+            true
+          ),
+        ],
+      }
+    : null;
+
+  // Toggle map basemap style between Dark Mode and Light Mode
   const handleToggleStyle = () => {
-    if (isDarkMode) {
-      setCurrentStyle(MAP_STYLES.STREETS);
-      setIsDarkMode(false);
-    } else {
-      setCurrentStyle(MAP_STYLES.DARK);
-      setIsDarkMode(true);
-    }
+    globalToggleTheme();
   };
 
   // Trigger MapLibre OfflineManager Vector Tile Download
@@ -243,7 +245,7 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
     setCacheProgress(0);
     const success = await offlineMapService.cacheRegion(
       {
-        packName: `safecircle-region-${Date.now().toString().slice(-4)}`,
+        packName: `safecircle-region-${isDarkMode ? 'dark' : 'light'}-${Date.now().toString().slice(-4)}`,
         latitude,
         longitude,
         mapStyle: currentStyle,
@@ -260,57 +262,85 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
   };
 
   return (
-    <View style={isFullScreen ? styles.fullScreenContainer : [styles.container, { height }]}>
+    <View style={isFullScreen ? [styles.fullScreenContainer, { backgroundColor: activeTheme.bgDark }] : [styles.container, { height, borderColor: activeTheme.borderDark }]}>
       {/* Google Maps Style Top Floating Header Bar */}
       {isFullScreen && (
         <View style={styles.googleMapsTopBar}>
           {onBack && (
-            <TouchableOpacity style={styles.googleMapsBackBtn} onPress={onBack} activeOpacity={0.8}>
-              <Text style={styles.googleMapsBackBtnText}>← Back</Text>
+            <TouchableOpacity
+              style={[styles.googleMapsBackBtn, { backgroundColor: activeTheme.mapOverlayGlass, borderColor: activeTheme.accentCyan }]}
+              onPress={onBack}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.googleMapsBackBtnText, { color: activeTheme.accentCyan }]}>← Back</Text>
             </TouchableOpacity>
           )}
-          <View style={styles.googleMapsTitleBox}>
-            <Text style={styles.googleMapsTitleText} numberOfLines={1}>📍 {targetName}</Text>
-            <Text style={styles.googleMapsSubtitleText}>Live Satellite & Geolocation Stream</Text>
+          <View style={[styles.googleMapsTitleBox, { backgroundColor: activeTheme.mapOverlayGlass, borderColor: activeTheme.borderDark }]}>
+            <Text style={[styles.googleMapsTitleText, { color: activeTheme.textPrimary }]} numberOfLines={1}>📍 {targetName}</Text>
+            <Text style={[styles.googleMapsSubtitleText, { color: activeTheme.accentCyan }]}>Live Satellite & Geolocation Stream</Text>
           </View>
         </View>
       )}
 
       {/* Floating Back Button for Embedded Maps */}
       {!isFullScreen && onBack && (
-        <TouchableOpacity style={styles.backFloatingBtn} onPress={onBack} activeOpacity={0.8}>
-          <Text style={styles.backFloatingBtnText}>← Back to Home</Text>
+        <TouchableOpacity
+          style={[styles.backFloatingBtn, { backgroundColor: activeTheme.mapOverlayGlass, borderColor: activeTheme.accentCyan }]}
+          onPress={onBack}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.backFloatingBtnText, { color: activeTheme.accentCyan }]}>← Back to Home</Text>
         </TouchableOpacity>
       )}
 
-      {/* FINAL APPROACH RADAR BANNER (< 15 METERS) */}
-      {isFinalApproach && (
-        <View style={[styles.finalApproachBanner, isFullScreen ? { top: 72 } : onBack ? { top: 52 } : null]}>
-          <Text style={styles.finalApproachTitle}>
-            🎯 FINAL APPROACH RADAR ACTIVE • {proximityDistance ? `${proximityDistance.toFixed(1)}m away` : '< 15m away'}
-          </Text>
-          <Text style={styles.finalApproachSubtitle}>
-            {bearingDegrees !== null
-              ? `Heading: ${Math.round(bearingDegrees)}° • Target is in immediate vicinity!`
-              : 'Close proximity detected — Switch to visual scanning!'}
+      {/* 1. Top Live GPS Info Badge for Embedded Mode */}
+      {!isFullScreen && (
+        <View style={[styles.mapOverlayBadge, { backgroundColor: activeTheme.mapOverlayGlass, borderColor: activeTheme.borderDark }, onBack ? { top: 52 } : null]}>
+          <View style={[styles.livePulseDot, isFinalApproach && styles.pulseDotRadar]} />
+          <Text style={[styles.mapOverlayText, { color: activeTheme.textPrimary }]}>
+            LIVE GPS • {targetName} • {latitude.toFixed(5)}, {longitude.toFixed(5)} (±{accuracy ? accuracy.toFixed(1) : '10'}m)
           </Text>
         </View>
       )}
 
-      {/* MapLibre Map View Container */}
+      {/* 2. FINAL APPROACH RADAR SLIM MICRO-PILL BADGE (STACKED CLEANLY BELOW GPS BADGE) */}
+      {isFinalApproach && (
+        <View style={[
+          styles.finalApproachPill,
+          {
+            backgroundColor: isDarkMode ? 'rgba(127, 29, 29, 0.88)' : 'rgba(254, 226, 226, 0.94)',
+            borderColor: activeTheme.accentRed,
+          },
+          !isFullScreen ? { top: onBack ? 88 : 46 } : isFullScreen ? { top: 72 } : null
+        ]}>
+          <View style={[styles.radarPillDot, { backgroundColor: activeTheme.accentRed }]} />
+          <Text style={[styles.radarPillText, { color: isDarkMode ? '#FFF' : '#991B1B' }]}>
+            🎯 RADAR ACTIVE • {proximityDistance ? `${proximityDistance.toFixed(1)}m away` : '< 15m'}
+          </Text>
+        </View>
+      )}
+
+      {/* MapLibre Map View Container - Single Invariant Instance */}
       <Map
         style={styles.map}
         mapStyle={currentStyle}
         logo={false}
         attribution={false}
         androidView="texture"
+        onPress={(e: any) => {
+          // When in Geofence Editor Mode, map touch captures coordinates for center pin
+          if (isEditorActive && e.geometry && e.geometry.type === 'Point') {
+            const [lng, lat] = e.geometry.coordinates;
+            setDraftCenter({ latitude: lat, longitude: lng });
+          }
+        }}
       >
         {/* CRITICAL: cameraRef attached directly to <Camera ref={cameraRef} /> centered on device */}
         <Camera
           ref={cameraRef}
           initialViewState={{
             centerCoordinate: [longitude, latitude],
-            zoomLevel: 11.5,
+            zoomLevel: 16.5,
           } as any}
         />
 
@@ -323,134 +353,344 @@ export const MapViewComponent: React.FC<MapViewComponentProps> = ({
           targetCoordinate={{ latitude, longitude, accuracy: accuracy || undefined }}
           durationMs={1500}
           title={targetName}
-          markerColor={isFinalApproach ? COLORS.accentRed : COLORS.accentCyan}
+          markerColor={isFinalApproach ? activeTheme.mapRouteColorEmergency : activeTheme.mapRouteColor}
           showHeadingArrow={true}
+          onPress={() => handleRecenter(18.0)}
         />
 
-        {/* Historical Route Line Layer */}
-        {routeCoordinates.length > 1 && (
+        {/* Historical Route Directional & Speed-Gradient Line Layer */}
+        {logs.length > 0 && routeGeoJSON.features.length > 0 && (
           <GeoJSONSource id="route-source" data={routeGeoJSON}>
+            {/* 1. Base Gradient Line */}
             <Layer
               id="route-line"
               type="line"
               paint={{
-                'line-color': isFinalApproach ? COLORS.accentRed : COLORS.accentCyan,
-                'line-width': 4,
-                'line-opacity': 0.85,
+                'line-color': ['get', 'color'] as any,
+                'line-width': 5,
+                'line-opacity': 0.9,
+              }}
+              layout={{
+                'line-cap': 'round',
+                'line-join': 'round',
+              }}
+            />
+            {/* 2. Directional Arrows Layer */}
+            <Layer
+              id="route-arrows"
+              type="symbol"
+              layout={{
+                'symbol-placement': 'line',
+                'symbol-spacing': 50,
+                'text-field': '➤',
+                'text-size': 16,
+                'text-pitch-alignment': 'map',
+                'text-rotation-alignment': 'map',
+                'text-keep-upright': false,
+              }}
+              paint={{
+                'text-color': '#FFFFFF',
+                'text-halo-color': 'rgba(0,0,0,0.5)',
+                'text-halo-width': 1,
               }}
             />
           </GeoJSONSource>
         )}
 
-        {/* Active Safe Zones Geofence Circles */}
+        {/* Active Safe Zones Geofence Circles - Theme-Aware Dynamic Color */}
         {safeZoneFeatures.length > 0 && (
           <GeoJSONSource id="safezones-source" data={safeZonesGeoJSON}>
             <Layer
               id="safezones-fill"
               type="fill"
               paint={{
-                'fill-color': COLORS.accentGreen,
-                'fill-opacity': 0.2,
+                'fill-color': activeTheme.mapGeofenceFill,
+                'fill-opacity': 0.25,
               }}
             />
             <Layer
               id="safezones-outline"
               type="line"
               paint={{
-                'line-color': COLORS.accentGreen,
+                'line-color': activeTheme.mapGeofenceOutline,
                 'line-width': 2.5,
               }}
             />
           </GeoJSONSource>
         )}
-      </Map>
 
-      {/* Top Live GPS Info Badge for Embedded Mode */}
-      {!isFullScreen && (
-        <View style={[styles.mapOverlayBadge, onBack ? { top: 52 } : null]}>
-          <View style={[styles.livePulseDot, isFinalApproach && styles.pulseDotRadar]} />
-          <Text style={styles.mapOverlayText}>
-            LIVE GPS • {targetName} • {latitude.toFixed(5)}, {longitude.toFixed(5)} (±{accuracy ? accuracy.toFixed(1) : '10'}m)
-          </Text>
-        </View>
-      )}
+        {/* 🟢 Real-Time Draft Geofence Preview Layer */}
+        {isEditorActive && draftPolygonGeoJSON && (
+          <GeoJSONSource id="draft-geofence-source" data={draftPolygonGeoJSON}>
+            <Layer
+              id="draft-geofence-fill"
+              type="fill"
+              paint={{
+                'fill-color': '#10B981',
+                'fill-opacity': 0.35,
+              }}
+            />
+            <Layer
+              id="draft-geofence-outline"
+              type="line"
+              paint={{
+                'line-color': '#34D399',
+                'line-width': 3,
+                'line-dasharray': [2, 2],
+              }}
+            />
+          </GeoJSONSource>
+        )}
+
+        {/* 🟢 Draft Center Marker Pin with Radius Badge */}
+        {isEditorActive && draftCenter && (
+          <Marker id="draft-center-pin" lngLat={[draftCenter.longitude, draftCenter.latitude]}>
+            <View style={styles.draftPinWrapper}>
+              <Text style={styles.draftPinIcon}>📍</Text>
+              <View style={[styles.draftPinBadge, { backgroundColor: activeTheme.cardBg, borderColor: activeTheme.accentGreen }]}>
+                <Text style={[styles.draftPinBadgeText, { color: activeTheme.textPrimary }]}>
+                  {draftRadius}m
+                </Text>
+              </View>
+            </View>
+          </Marker>
+        )}
+      </Map>
 
       {/* Offline Tile Caching Status Toast */}
       {cacheProgress !== null && (
-        <View style={[styles.cacheProgressBadge, isFullScreen ? { top: 80 } : null]}>
-          <Text style={styles.cacheProgressText}>
+        <View style={[styles.cacheProgressBadge, { backgroundColor: activeTheme.mapOverlayGlass, borderColor: activeTheme.accentCyan }, isFullScreen ? { top: 80 } : null]}>
+          <Text style={[styles.cacheProgressText, { color: activeTheme.textPrimary }]}>
             💾 Caching Map Tiles Offline... {cacheProgress}%
           </Text>
         </View>
       )}
       {isCached && cacheProgress === null && (
-        <View style={[styles.cacheProgressBadge, { backgroundColor: COLORS.accentGreenBg }, isFullScreen ? { top: 80 } : null]}>
-          <Text style={styles.cacheProgressText}>✅ Offline Map Cached</Text>
+        <View style={[styles.cacheProgressBadge, { backgroundColor: activeTheme.accentGreenBg, borderColor: activeTheme.accentGreen }, isFullScreen ? { top: 80 } : null]}>
+          <Text style={[styles.cacheProgressText, { color: isDarkMode ? '#FFF' : activeTheme.accentGreen }]}>✅ Offline Map Cached</Text>
         </View>
       )}
 
-      {/* FLOATING ACTION BUTTON CONTROLS (INCLUDES 🎯 MY LOCATION RECENTER BUTTON) */}
-      {isFullScreen ? (
-        <View style={styles.googleMapsBottomSheet}>
-          <View style={styles.bottomSheetHandle} />
-          <View style={styles.bottomSheetHeaderRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.bottomSheetTitle}>{targetName}</Text>
-              <Text style={styles.bottomSheetCoords}>
-                📍 {latitude.toFixed(5)}, {longitude.toFixed(5)} • ±{accuracy ? accuracy.toFixed(1) : '5'}m
-              </Text>
+      {/* 🛡️ INTERACTIVE ON-MAP GEOFENCE VISUAL EDITOR BOTTOM SHEET */}
+      {isEditorActive && (
+        <View style={[styles.geofenceEditorCard, { backgroundColor: activeTheme.cardBgGlass, borderColor: activeTheme.borderDark }]}>
+          <View style={styles.editorHeaderRow}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={{ fontSize: 18, marginRight: 8 }}>🛡️</Text>
+              <Text style={[styles.editorTitle, { color: activeTheme.textPrimary }]}>Visual Safe Zone Editor</Text>
             </View>
-            <View style={styles.bottomSheetBadge}>
-              <View style={styles.livePulseDot} />
-              <Text style={styles.bottomSheetBadgeText}>LIVE GPS</Text>
+            <TouchableOpacity
+              onPress={() => {
+                setIsEditorActive(false);
+                setDraftCenter(null);
+                setDraftZoneName('');
+              }}
+            >
+              <Text style={{ color: activeTheme.accentRed, fontWeight: '700', fontSize: 13 }}>✕ Cancel</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={[styles.editorInstruction, { color: activeTheme.textSecondary }]}>
+            {draftCenter
+              ? `📍 Center: ${draftCenter.latitude.toFixed(5)}°, ${draftCenter.longitude.toFixed(5)}° (Tap map to move)`
+              : '👉 Tap anywhere on map to set safe zone center'}
+          </Text>
+
+          {/* Safe Zone Name Input */}
+          <TextInput
+            style={[
+              styles.editorTextInput,
+              {
+                backgroundColor: activeTheme.bgDark,
+                color: activeTheme.textPrimary,
+                borderColor: activeTheme.borderDark,
+              },
+            ]}
+            placeholder="e.g. Home Perimeter, Campus, Office"
+            placeholderTextColor={activeTheme.textMuted}
+            value={draftZoneName}
+            onChangeText={setDraftZoneName}
+          />
+
+          {/* Quick Radius Selection Chips */}
+          <View style={styles.radiusContainer}>
+            <Text style={[styles.radiusHeading, { color: activeTheme.textPrimary }]}>
+              Perimeter Radius: <Text style={{ color: activeTheme.accentCyan, fontWeight: '800' }}>{draftRadius}m</Text>
+            </Text>
+            <View style={styles.radiusChipsRow}>
+              {[100, 250, 500, 1000, 2000].map(r => (
+                <TouchableOpacity
+                  key={r}
+                  style={[
+                    styles.radiusChip,
+                    { borderColor: activeTheme.borderDark },
+                    draftRadius === r && {
+                      backgroundColor: activeTheme.accentPrimary,
+                      borderColor: activeTheme.accentPrimary,
+                    },
+                  ]}
+                  onPress={() => setDraftRadius(r)}
+                >
+                  <Text
+                    style={[
+                      styles.radiusChipText,
+                      { color: draftRadius === r ? '#FFF' : activeTheme.textSecondary },
+                    ]}
+                  >
+                    {r >= 1000 ? `${r / 1000}km` : `${r}m`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
-          {/* Quick Action Button Row with Floating Recenter Action */}
-          <View style={styles.bottomSheetActionRow}>
+          {/* Save & Activate Safe Zone Button */}
+          <TouchableOpacity
+            style={[
+              styles.saveZoneBtn,
+              {
+                backgroundColor:
+                  !draftCenter || !draftZoneName.trim()
+                    ? activeTheme.borderDark
+                    : activeTheme.accentGreen,
+              },
+            ]}
+            disabled={!draftCenter || !draftZoneName.trim()}
+            onPress={() => {
+              if (!draftCenter) {
+                Alert.alert('Location Required', 'Please tap on the map to set the safe zone center position.');
+                return;
+              }
+              if (!draftZoneName.trim()) {
+                Alert.alert('Name Required', 'Please enter a name for this Safe Zone.');
+                return;
+              }
+              onCreateSafeZone?.(
+                draftZoneName.trim(),
+                draftRadius,
+                draftCenter.latitude,
+                draftCenter.longitude
+              );
+              setIsEditorActive(false);
+              setDraftCenter(null);
+              setDraftZoneName('');
+            }}
+          >
+            <Text style={styles.saveZoneBtnText}>
+              ✓ Save & Activate Safe Zone ({draftRadius}m)
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* FLOATING ACTION BUTTON CONTROLS (INCLUDES 🎯 MY LOCATION, 🛡️ + ZONE, & 🌙/☀️ THEME TOGGLE) */}
+      {!isEditorActive && (
+        isFullScreen ? (
+          <View style={[styles.googleMapsBottomSheet, { backgroundColor: activeTheme.cardBgGlass, borderColor: activeTheme.borderDark }]}>
+            <View style={[styles.bottomSheetHandle, { backgroundColor: activeTheme.borderDark }]} />
+            <View style={styles.bottomSheetHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.bottomSheetTitle, { color: activeTheme.textPrimary }]}>{targetName}</Text>
+                <Text style={[styles.bottomSheetCoords, { color: activeTheme.textSecondary }]}>
+                  📍 {latitude.toFixed(5)}, {longitude.toFixed(5)} • ±{accuracy ? accuracy.toFixed(1) : '5'}m
+                </Text>
+              </View>
+              <View style={[styles.bottomSheetBadge, { backgroundColor: activeTheme.accentGreenBg, borderColor: activeTheme.accentGreen }]}>
+                <View style={[styles.livePulseDot, { backgroundColor: activeTheme.accentGreen }]} />
+                <Text style={[styles.bottomSheetBadgeText, { color: isDarkMode ? '#FFF' : activeTheme.accentGreen }]}>LIVE GPS</Text>
+              </View>
+            </View>
+
+            {/* Quick Action Button Row with Safe Zone Editor & Theme Toggle */}
+            <View style={styles.bottomSheetActionRow}>
+              {onOpenARView && (
+                <TouchableOpacity style={[styles.bottomSheetBtn, { backgroundColor: activeTheme.accentRedBg, borderColor: activeTheme.accentRed }]} onPress={onOpenARView}>
+                  <Text style={styles.bottomSheetBtnIcon}>📷</Text>
+                  <Text style={[styles.bottomSheetBtnText, { color: isDarkMode ? '#FFF' : activeTheme.accentRed }]}>AR Vision</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[styles.bottomSheetBtn, { backgroundColor: activeTheme.mapControlBtnBg, borderColor: activeTheme.mapControlBtnBorder }]}
+                onPress={() => {
+                  setIsEditorActive(true);
+                  if (!draftCenter && latitude && longitude) {
+                    setDraftCenter({ latitude, longitude });
+                  }
+                }}
+              >
+                <Text style={styles.bottomSheetBtnIcon}>🛡️</Text>
+                <Text style={[styles.bottomSheetBtnText, { color: activeTheme.mapControlBtnText }]}>+ Safe Zone</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.bottomSheetBtn, { backgroundColor: activeTheme.mapControlBtnBg, borderColor: activeTheme.mapControlBtnBorder }]}
+                onPress={handleRecenter}
+              >
+                <Text style={styles.bottomSheetBtnIcon}>🎯</Text>
+                <Text style={[styles.bottomSheetBtnText, { color: activeTheme.mapControlBtnText }]}>My Location</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.bottomSheetBtn, { backgroundColor: activeTheme.mapControlBtnBg, borderColor: activeTheme.mapControlBtnBorder }]}
+                onPress={handleToggleStyle}
+              >
+                <Text style={styles.bottomSheetBtnIcon}>{isDarkMode ? '🌙' : '☀️'}</Text>
+                <Text style={[styles.bottomSheetBtnText, { color: activeTheme.mapControlBtnText }]}>{isDarkMode ? 'Dark' : 'Light'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.bottomSheetBtn, { backgroundColor: activeTheme.mapControlBtnBg, borderColor: activeTheme.mapControlBtnBorder }]}
+                onPress={handleDownloadOfflineTiles}
+              >
+                <Text style={styles.bottomSheetBtnIcon}>📥</Text>
+                <Text style={[styles.bottomSheetBtnText, { color: activeTheme.mapControlBtnText }]}>Offline Pack</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          /* Interactive Map Control Floating Action Buttons for Embedded Preview */
+          <View style={styles.controlsContainer}>
             {onOpenARView && (
-              <TouchableOpacity style={[styles.bottomSheetBtn, { backgroundColor: COLORS.accentRedBg, borderColor: COLORS.accentRed }]} onPress={onOpenARView}>
-                <Text style={styles.bottomSheetBtnIcon}>📷</Text>
-                <Text style={[styles.bottomSheetBtnText, { color: '#FFF' }]}>AR Vision</Text>
+              <TouchableOpacity style={[styles.controlBtn, { backgroundColor: activeTheme.accentRedBg, borderColor: activeTheme.accentRed }]} onPress={onOpenARView}>
+                <Text style={styles.controlBtnIcon}>📷</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.bottomSheetBtn} onPress={handleRecenter}>
-              <Text style={styles.bottomSheetBtnIcon}>🎯</Text>
-              <Text style={styles.bottomSheetBtnText}>My Location</Text>
+            {onExpandFullScreen && (
+              <TouchableOpacity
+                style={[styles.controlBtn, { backgroundColor: activeTheme.mapControlBtnBg, borderColor: activeTheme.mapControlBtnBorder }]}
+                onPress={onExpandFullScreen}
+              >
+                <Text style={styles.controlBtnIcon}>⛶</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[styles.controlBtn, { backgroundColor: activeTheme.mapControlBtnBg, borderColor: activeTheme.mapControlBtnBorder }]}
+              onPress={() => {
+                setIsEditorActive(true);
+                if (!draftCenter && latitude && longitude) {
+                  setDraftCenter({ latitude, longitude });
+                }
+              }}
+            >
+              <Text style={styles.controlBtnIcon}>🛡️</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.bottomSheetBtn} onPress={handleToggleStyle}>
-              <Text style={styles.bottomSheetBtnIcon}>{isDarkMode ? '🌙' : '☀️'}</Text>
-              <Text style={styles.bottomSheetBtnText}>{isDarkMode ? 'Dark' : 'Streets'}</Text>
+            <TouchableOpacity
+              style={[styles.controlBtn, { backgroundColor: activeTheme.mapControlBtnBg, borderColor: activeTheme.mapControlBtnBorder }]}
+              onPress={handleRecenter}
+            >
+              <Text style={styles.controlBtnIcon}>🎯</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.bottomSheetBtn} onPress={handleDownloadOfflineTiles}>
-              <Text style={styles.bottomSheetBtnIcon}>📥</Text>
-              <Text style={styles.bottomSheetBtnText}>Offline Pack</Text>
+            <TouchableOpacity
+              style={[styles.controlBtn, { backgroundColor: activeTheme.mapControlBtnBg, borderColor: activeTheme.mapControlBtnBorder }]}
+              onPress={handleToggleStyle}
+            >
+              <Text style={styles.controlBtnIcon}>{isDarkMode ? '🌙' : '☀️'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.controlBtn, { backgroundColor: activeTheme.mapControlBtnBg, borderColor: activeTheme.mapControlBtnBorder }]}
+              onPress={handleDownloadOfflineTiles}
+            >
+              <Text style={styles.controlBtnIcon}>📥</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      ) : (
-        /* Interactive Map Control Floating Action Buttons for Embedded Preview */
-        <View style={styles.controlsContainer}>
-          {onOpenARView && (
-            <TouchableOpacity style={[styles.controlBtn, { backgroundColor: COLORS.accentRedBg, borderColor: COLORS.accentRed }]} onPress={onOpenARView}>
-              <Text style={styles.controlBtnIcon}>📷</Text>
-            </TouchableOpacity>
-          )}
-          {onExpandFullScreen && (
-            <TouchableOpacity style={styles.controlBtn} onPress={onExpandFullScreen}>
-              <Text style={styles.controlBtnIcon}>⛶</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity style={styles.controlBtn} onPress={handleRecenter}>
-            <Text style={styles.controlBtnIcon}>🎯</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.controlBtn} onPress={handleToggleStyle}>
-            <Text style={styles.controlBtnIcon}>{isDarkMode ? '🌙' : '☀️'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.controlBtn} onPress={handleDownloadOfflineTiles}>
-            <Text style={styles.controlBtnIcon}>📥</Text>
-          </TouchableOpacity>
-        </View>
+        )
       )}
     </View>
   );
@@ -462,7 +702,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: COLORS.borderDark,
     marginVertical: 16,
     position: 'relative',
   },
@@ -471,7 +710,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     position: 'relative',
-    backgroundColor: '#0F172A',
   },
   map: {
     flex: 1,
@@ -480,10 +718,8 @@ const styles = StyleSheet.create({
   },
   placeholderContainer: {
     width: '100%',
-    backgroundColor: COLORS.cardBg,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: COLORS.borderDark,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -494,13 +730,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   placeholderTitle: {
-    color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 4,
   },
   placeholderSubtitle: {
-    color: COLORS.textMuted,
     fontSize: 12,
     textAlign: 'center',
   },
@@ -509,28 +743,30 @@ const styles = StyleSheet.create({
     top: 12,
     left: 12,
     right: 12,
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 20,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: COLORS.borderDark,
     zIndex: 10,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   livePulseDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: COLORS.accentGreen,
+    backgroundColor: '#10B981',
     marginRight: 8,
   },
   pulseDotRadar: {
-    backgroundColor: COLORS.accentRed,
+    backgroundColor: '#EF4444',
   },
   mapOverlayText: {
-    color: COLORS.textPrimary,
     fontSize: 11,
     fontWeight: '600',
     flex: 1,
@@ -546,92 +782,62 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: COLORS.cardBg,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: COLORS.borderDark,
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 4,
   },
   controlBtnIcon: {
     fontSize: 18,
   },
-  markerWrapper: {
-    width: 44,
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  markerCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.accentCyan,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#FFF',
-    elevation: 6,
-  },
-  markerCircleRadar: {
-    backgroundColor: COLORS.accentRed,
-  },
-  markerIcon: {
-    fontSize: 18,
-  },
-  radarPulseRing: {
+  finalApproachPill: {
     position: 'absolute',
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(239, 68, 68, 0.35)',
-    borderWidth: 1.5,
-    borderColor: COLORS.accentRed,
-  },
-  finalApproachBanner: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    right: 12,
-    backgroundColor: 'rgba(127, 29, 29, 0.95)',
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    zIndex: 90,
+    top: 10,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: COLORS.accentRed,
-    elevation: 8,
+    zIndex: 90,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
-  finalApproachTitle: {
-    color: '#FFF',
-    fontSize: 13,
-    fontWeight: '800',
-    marginBottom: 2,
+  radarPillDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
   },
-  finalApproachSubtitle: {
-    color: 'rgba(255, 255, 255, 0.85)',
+  radarPillText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '800',
   },
   cacheProgressBadge: {
     position: 'absolute',
     top: 50,
     alignSelf: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.9)',
     paddingVertical: 6,
     paddingHorizontal: 14,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: COLORS.accentCyan,
     zIndex: 15,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
   },
   cacheProgressText: {
-    color: COLORS.textPrimary,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -639,16 +845,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 12,
     left: 12,
-    backgroundColor: 'rgba(15, 23, 42, 0.95)',
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: COLORS.accentCyan,
     zIndex: 99,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
   },
   backFloatingBtnText: {
-    color: COLORS.accentCyan,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -662,45 +870,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   googleMapsBackBtn: {
-    backgroundColor: 'rgba(15, 23, 42, 0.95)',
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: COLORS.accentCyan,
     marginRight: 10,
     elevation: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.3,
     shadowRadius: 6,
   },
   googleMapsBackBtnText: {
-    color: COLORS.accentCyan,
     fontSize: 14,
     fontWeight: '800',
   },
   googleMapsTitleBox: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.95)',
     borderRadius: 24,
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: COLORS.borderDark,
     elevation: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.3,
     shadowRadius: 6,
   },
   googleMapsTitleText: {
-    color: COLORS.textPrimary,
     fontSize: 14,
     fontWeight: '800',
   },
   googleMapsSubtitleText: {
-    color: COLORS.accentCyan,
     fontSize: 11,
     fontWeight: '600',
   },
@@ -709,22 +910,19 @@ const styles = StyleSheet.create({
     bottom: 12,
     left: 12,
     right: 12,
-    backgroundColor: 'rgba(15, 23, 42, 0.96)',
     borderRadius: 24,
     padding: 16,
     borderWidth: 1,
-    borderColor: COLORS.borderDark,
     zIndex: 99,
     elevation: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
+    shadowOpacity: 0.35,
     shadowRadius: 10,
   },
   bottomSheetHandle: {
     width: 36,
     height: 4,
-    backgroundColor: COLORS.borderDark,
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: 10,
@@ -736,27 +934,22 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   bottomSheetTitle: {
-    color: COLORS.textPrimary,
     fontSize: 18,
     fontWeight: '800',
   },
   bottomSheetCoords: {
-    color: COLORS.textSecondary,
     fontSize: 12,
     marginTop: 2,
   },
   bottomSheetBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.accentGreenBg,
     paddingVertical: 4,
     paddingHorizontal: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: COLORS.accentGreen,
   },
   bottomSheetBadgeText: {
-    color: '#FFF',
     fontSize: 11,
     fontWeight: '800',
   },
@@ -767,21 +960,121 @@ const styles = StyleSheet.create({
   },
   bottomSheetBtn: {
     flex: 1,
-    backgroundColor: COLORS.cardBg,
     borderRadius: 14,
     paddingVertical: 10,
     marginHorizontal: 4,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: COLORS.borderDark,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
   },
   bottomSheetBtnIcon: {
     fontSize: 18,
     marginBottom: 2,
   },
   bottomSheetBtnText: {
-    color: COLORS.textPrimary,
     fontSize: 11,
     fontWeight: '700',
+  },
+  // Draft Center Pin Marker Styles
+  draftPinWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  draftPinIcon: {
+    fontSize: 28,
+  },
+  draftPinBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: -4,
+    elevation: 4,
+  },
+  draftPinBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  // Geofence Editor Floating Sheet Card Styles
+  geofenceEditorCard: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    right: 12,
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    zIndex: 100,
+    elevation: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+  },
+  editorHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  editorTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  editorInstruction: {
+    fontSize: 11,
+    marginBottom: 10,
+    fontWeight: '500',
+  },
+  editorTextInput: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  radiusContainer: {
+    marginBottom: 12,
+  },
+  radiusHeading: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  radiusChipsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  radiusChip: {
+    flex: 1,
+    paddingVertical: 6,
+    marginHorizontal: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  radiusChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  saveZoneBtn: {
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  saveZoneBtnText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

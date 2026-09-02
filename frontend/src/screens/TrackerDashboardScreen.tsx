@@ -52,8 +52,24 @@ export const TrackerDashboardScreen: React.FC<TrackerDashboardScreenProps> = ({
       </View>
 
       {/* Distress Alert Status Banner */}
-      <View style={[styles.bannerStatic, { backgroundColor: COLORS.accentRedBg, borderColor: COLORS.accentRed }]}>
-        <Text style={styles.bannerStaticText}>🚨 EMERGENCY SOS BROADCAST ACTIVE</Text>
+      <View
+        style={[
+          styles.bannerStatic,
+          trackerInfo.isActiveSos
+            ? { backgroundColor: COLORS.accentRedBg, borderColor: COLORS.accentRed }
+            : { backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: '#10B981' },
+        ]}
+      >
+        <Text
+          style={[
+            styles.bannerStaticText,
+            !trackerInfo.isActiveSos && { color: '#6EE7B7' },
+          ]}
+        >
+          {trackerInfo.isActiveSos
+            ? '🚨 EMERGENCY SOS BROADCAST ACTIVE'
+            : '🌐 ALWAYS-ON CIRCLE MONITORING ACTIVE (User Safe)'}
+        </Text>
       </View>
 
       {/* Target Individual Details Card */}

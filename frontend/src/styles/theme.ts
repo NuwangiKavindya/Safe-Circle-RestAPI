@@ -1,25 +1,117 @@
 import { StyleSheet, Platform } from 'react-native';
 
-export const COLORS = {
-  bgDark: '#0F172A',
-  cardBg: '#1E293B',
-  borderDark: '#334155',
-  borderLight: '#475569',
-  textPrimary: '#F8FAFC',
-  textSecondary: '#94A3B8',
-  textMuted: '#64748B',
-  accentPrimary: '#2563EB',
-  accentPrimaryGlow: '#3B82F6',
-  accentCyan: '#38BDF8',
-  accentGreen: '#10B981',
-  accentGreenBg: '#065F46',
-  accentRed: '#EF4444',
-  accentRedDark: '#991B1B',
-  accentRedBg: '#7F1D1D',
-  indigoBg: '#312E81',
-  indigoBorder: '#4F46E5',
-  indigoText: '#C7D2FE',
+export interface ThemePalette {
+  isDark: boolean;
+  bgDark: string;
+  cardBg: string;
+  cardBgGlass: string;
+  borderDark: string;
+  borderLight: string;
+  textPrimary: string;
+  textSecondary: string;
+  textMuted: string;
+  accentPrimary: string;
+  accentPrimaryGlow: string;
+  accentCyan: string;
+  accentGreen: string;
+  accentGreenBg: string;
+  accentRed: string;
+  accentRedDark: string;
+  accentRedBg: string;
+  indigoBg: string;
+  indigoBorder: string;
+  indigoText: string;
+
+  // Map-specific dynamic tokens
+  mapStyleUrl: string;
+  mapRouteColor: string;
+  mapRouteColorEmergency: string;
+  mapGeofenceFill: string;
+  mapGeofenceOutline: string;
+  mapOverlayGlass: string;
+  mapControlBtnBg: string;
+  mapControlBtnBorder: string;
+  mapControlBtnText: string;
+  mapMarkerTitleBg: string;
+  mapMarkerTitleBorder: string;
+  mapMarkerTitleText: string;
+}
+
+export const THEME_PALETTES: { dark: ThemePalette; light: ThemePalette } = {
+  dark: {
+    isDark: true,
+    bgDark: '#0F172A',
+    cardBg: '#1E293B',
+    cardBgGlass: 'rgba(15, 23, 42, 0.92)',
+    borderDark: '#334155',
+    borderLight: '#475569',
+    textPrimary: '#F8FAFC',
+    textSecondary: '#94A3B8',
+    textMuted: '#64748B',
+    accentPrimary: '#2563EB',
+    accentPrimaryGlow: '#3B82F6',
+    accentCyan: '#38BDF8',
+    accentGreen: '#10B981',
+    accentGreenBg: '#065F46',
+    accentRed: '#EF4444',
+    accentRedDark: '#991B1B',
+    accentRedBg: '#7F1D1D',
+    indigoBg: '#312E81',
+    indigoBorder: '#4F46E5',
+    indigoText: '#C7D2FE',
+
+    mapStyleUrl: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+    mapRouteColor: '#38BDF8',
+    mapRouteColorEmergency: '#EF4444',
+    mapGeofenceFill: 'rgba(16, 185, 129, 0.20)',
+    mapGeofenceOutline: '#10B981',
+    mapOverlayGlass: 'rgba(15, 23, 42, 0.88)',
+    mapControlBtnBg: '#1E293B',
+    mapControlBtnBorder: '#334155',
+    mapControlBtnText: '#F8FAFC',
+    mapMarkerTitleBg: '#0F172A',
+    mapMarkerTitleBorder: '#38BDF8',
+    mapMarkerTitleText: '#F8FAFC',
+  },
+  light: {
+    isDark: false,
+    bgDark: '#F1F5F9',
+    cardBg: '#FFFFFF',
+    cardBgGlass: 'rgba(255, 255, 255, 0.94)',
+    borderDark: '#CBD5E1',
+    borderLight: '#E2E8F0',
+    textPrimary: '#0F172A',
+    textSecondary: '#475569',
+    textMuted: '#94A3B8',
+    accentPrimary: '#2563EB',
+    accentPrimaryGlow: '#3B82F6',
+    accentCyan: '#0284C7',
+    accentGreen: '#059669',
+    accentGreenBg: '#D1FAE5',
+    accentRed: '#DC2626',
+    accentRedDark: '#991B1B',
+    accentRedBg: '#FEE2E2',
+    indigoBg: '#E0E7FF',
+    indigoBorder: '#6366F1',
+    indigoText: '#3730A3',
+
+    mapStyleUrl: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+    mapRouteColor: '#2563EB',
+    mapRouteColorEmergency: '#DC2626',
+    mapGeofenceFill: 'rgba(16, 185, 129, 0.22)',
+    mapGeofenceOutline: '#059669',
+    mapOverlayGlass: 'rgba(255, 255, 255, 0.92)',
+    mapControlBtnBg: '#FFFFFF',
+    mapControlBtnBorder: '#CBD5E1',
+    mapControlBtnText: '#0F172A',
+    mapMarkerTitleBg: '#FFFFFF',
+    mapMarkerTitleBorder: '#2563EB',
+    mapMarkerTitleText: '#0F172A',
+  },
 };
+
+export const COLORS = THEME_PALETTES.dark;
+
 
 export const globalStyles = StyleSheet.create({
   safeArea: {

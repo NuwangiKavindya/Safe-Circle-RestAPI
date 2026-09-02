@@ -44,6 +44,7 @@ export interface TrustedContact {
   relationship?: string;
   isVerified: boolean;
   accessCode: string;
+  sharingMode?: 'EMERGENCY_ONLY' | 'ALWAYS_ON';
   createdAt: string;
 }
 
@@ -537,6 +538,44 @@ class ApiService {
       return {
         success: true,
         message: data.message,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Update location sharing mode for a trusted contact
+   */
+  async updateContactSharingMode(
+    token: string,
+    contactId: string,
+    sharingMode: 'EMERGENCY_ONLY' | 'ALWAYS_ON'
+  ): Promise<{ success: boolean; data?: TrustedContact; message?: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/contacts/${contactId}/sharing-mode`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ sharingMode }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to update contact sharing mode',
+        };
+      }
+
+      return {
+        success: true,
+        data: data.data,
       };
     } catch (error: any) {
       return {

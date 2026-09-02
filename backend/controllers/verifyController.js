@@ -52,6 +52,7 @@ exports.verifyAccessCode = async (req, res) => {
             data: {
                 contactName: contact.contactName,
                 relationship: contact.relationship,
+                sharingMode: contact.sharingMode || 'EMERGENCY_ONLY',
                 targetUser: {
                     id: contact.user.id,
                     fullName: contact.user.fullName,
@@ -74,7 +75,7 @@ exports.verifyAccessCode = async (req, res) => {
 /**
  * @desc    Get real-time location logs for shared contact access code
  * @route   GET /api/location/shared/:accessCode
- * @access  Public (Secured by active SOS emergency verification)
+ * @access  Public (Secured by active SOS emergency verification or ALWAYS_ON mode)
  */
 exports.getSharedLocationHistory = async (req, res) => {
     try {
@@ -92,7 +93,7 @@ exports.getSharedLocationHistory = async (req, res) => {
             });
         }
 
-        // 2. Validate emergency status (Enforce privacy: logs can only be read during ACTIVE SOS)
+        // 2. Validate emergency status or ALWAYS_ON mode
         const activeAlert = await Alert.findOne({
             where: {
                 userId: contact.userId,
@@ -100,10 +101,12 @@ exports.getSharedLocationHistory = async (req, res) => {
             }
         });
 
-        if (!activeAlert) {
+        const isAlwaysOn = contact.sharingMode === 'ALWAYS_ON';
+
+        if (!activeAlert && !isAlwaysOn) {
             return res.status(403).json({
                 success: false,
-                message: 'Access forbidden. Geolocation logs are only visible during active emergency SOS events.'
+                message: 'Access forbidden. Geolocation logs are visible only during active emergency SOS events (or when Always-On Circle sharing is enabled).'
             });
         }
 

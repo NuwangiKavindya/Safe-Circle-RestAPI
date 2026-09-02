@@ -52,6 +52,11 @@ const TrustedContact = sequelize.define('TrustedContact', {
         type: DataTypes.STRING(20),
         allowNull: true,
         unique: true
+    },
+    sharingMode: {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        defaultValue: 'EMERGENCY_ONLY'
     }
 }, {
     timestamps: true,

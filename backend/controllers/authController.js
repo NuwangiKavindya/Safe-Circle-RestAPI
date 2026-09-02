@@ -2,7 +2,7 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_WEB_CLIENT_ID || '302894885438-bds6snndbttnu7eu29hjej4u1mq3fp66.apps.googleusercontent.com');
 
 
 // Generate JWT token
@@ -169,12 +169,27 @@ exports.googleLogin = async (req, res) => {
     }
 
     try {
-        const validAudiences = [
+        const rawAudiences = [
             process.env.GOOGLE_CLIENT_ID,
             process.env.GOOGLE_WEB_CLIENT_ID,
             process.env.GOOGLE_IOS_CLIENT_ID,
             process.env.GOOGLE_ANDROID_CLIENT_ID,
-        ].filter(Boolean);
+            // Known client IDs for active Firebase project (app1-95e39)
+            '302894885438-bds6snndbttnu7eu29hjej4u1mq3fp66.apps.googleusercontent.com',
+            '302894885438-8gaig5o9sv739483erahdgeacbgm4aul.apps.googleusercontent.com',
+            // Known client IDs for legacy project
+            '342423658982-ehokj2fvf0itu21b2t7hs04ucmjcu6nt.apps.googleusercontent.com',
+            '342423658982-347u6f371ggse38835aasdaf8jmn9im5.apps.googleusercontent.com',
+            '342423658982-3sj5f5oiuv6hqduk15mtv69jtet1li4v.apps.googleusercontent.com',
+            '342423658982-dkt3lat80cve8m7kgg92tl4b13iioqtn.apps.googleusercontent.com',
+        ];
+
+        const validAudiences = Array.from(new Set(
+            rawAudiences
+                .filter(Boolean)
+                .flatMap(aud => String(aud).split(',').map(s => s.trim()))
+                .filter(Boolean)
+        ));
 
         const ticket = await client.verifyIdToken({
             idToken,
@@ -218,10 +233,11 @@ exports.googleLogin = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Verify ID token error: ', error);
+        console.error('Verify ID token error: ', error.message || error);
         res.status(401).json({
             success: false,
             message: 'Invalid Google ID token',
+            debug: process.env.NODE_ENV !== 'production' ? (error.message || String(error)) : undefined,
         });
     }
 };

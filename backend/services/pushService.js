@@ -1,23 +1,26 @@
 const path = require('path');
 const fs = require('fs');
 
-let admin = null;
+const { initializeApp, cert, getApps } = require('firebase-admin/app');
+const { getMessaging } = require('firebase-admin/messaging');
+
+let isInitialized = false;
 try {
-  admin = require('firebase-admin');
   const serviceAccountPath = path.join(__dirname, '../config/safe-circle-firebase-key.json');
 
   if (fs.existsSync(serviceAccountPath)) {
     const serviceAccount = require(serviceAccountPath);
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+    initializeApp({
+      credential: cert(serviceAccount),
     });
+    isInitialized = true;
     console.log('[PushService] ✅ Firebase Admin SDK initialized successfully.');
   } else {
     console.log('[PushService] ℹ️ Firebase service key not found at config/safe-circle-firebase-key.json. Running in fallback mode.');
   }
 } catch (error) {
   console.warn('[PushService] Could not initialize firebase-admin:', error.message);
-  admin = null;
+  isInitialized = false;
 }
 
 /**
@@ -59,9 +62,9 @@ async function sendEmergencyPushNotification(targetTokens, alertPayload) {
     tokens: validTokens,
   };
 
-  if (admin && admin.apps && admin.apps.length > 0) {
+  if (isInitialized && getApps().length > 0) {
     try {
-      const response = await admin.messaging().sendMulticast(message);
+      const response = await getMessaging().sendEachForMulticast(message);
       console.log(`[PushService] 🚀 FCM Multicast sent successfully to ${response.successCount} / ${validTokens.length} devices.`);
       return { success: true, response };
     } catch (err) {

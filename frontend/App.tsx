@@ -34,9 +34,12 @@ import { TrackerAuthScreen } from './src/screens/TrackerAuthScreen';
 import { TrackerDashboardScreen } from './src/screens/TrackerDashboardScreen';
 import { MapViewComponent } from './src/components/MapViewComponent';
 import { ARViewComponent } from './src/components/ARViewComponent';
+import { TacticalSplitMapScreen } from './src/screens/TacticalSplitMapScreen';
+import { ThemeProvider } from './src/context/ThemeContext';
 
-const App = () => {
+const MainApp = () => {
   // Navigation & Session State
+
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('WELCOME');
   const [previousScreenForMap, setPreviousScreenForMap] = useState<ScreenType>('DASHBOARD');
   const [token, setToken] = useState<string | null>(null);
@@ -159,7 +162,7 @@ const App = () => {
     loadSession();
 
     GoogleSignin.configure({
-      webClientId: '342423658982-ehokj2fvf0itu21b2t7hs04ucmjcu6nt.apps.googleusercontent.com',
+      webClientId: '302894885438-bds6snndbttnu7eu29hjej4u1mq3fp66.apps.googleusercontent.com',
       iosClientId: '342423658982-3sj5f5oiuv6hqduk15mtv69jtet1li4v.apps.googleusercontent.com',
       offlineAccess: true,
     });
@@ -492,23 +495,28 @@ const App = () => {
   }, [token]);
 
   // Safe Zone Handlers
-  const handleCreateSafeZone = async (zoneName: string, radiusMeters: number) => {
+  const handleCreateSafeZone = async (
+    zoneName: string,
+    radiusMeters: number,
+    customLat?: number,
+    customLng?: number
+  ) => {
     if (!token) return;
 
-    let currentLat = liveLocation?.latitude;
-    let currentLng = liveLocation?.longitude;
+    let targetLat = customLat !== undefined ? customLat : liveLocation?.latitude;
+    let targetLng = customLng !== undefined ? customLng : liveLocation?.longitude;
 
-    if (currentLat === undefined || currentLng === undefined || currentLat === null || currentLng === null) {
+    if (targetLat === undefined || targetLng === undefined || targetLat === null || targetLng === null) {
       setLoading(true);
       const loc = await locationService.getCurrentLocation();
       setLoading(false);
       if (loc) {
-        currentLat = loc.latitude;
-        currentLng = loc.longitude;
+        targetLat = loc.latitude;
+        targetLng = loc.longitude;
       }
     }
 
-    if (currentLat === undefined || currentLng === undefined || currentLat === null || currentLng === null) {
+    if (targetLat === undefined || targetLng === undefined || targetLat === null || targetLng === null) {
       triggerFeedback('Could not fetch GPS location to create safe zone. Please enable GPS location services.');
       return;
     }
@@ -516,8 +524,8 @@ const App = () => {
     setLoading(true);
     const result = await apiService.createSafeZone(token, {
       zoneName,
-      latitude: currentLat,
-      longitude: currentLng,
+      latitude: targetLat,
+      longitude: targetLng,
       radiusMeters,
     });
     setLoading(false);
@@ -529,6 +537,7 @@ const App = () => {
       triggerFeedback(result.message || 'Failed to create safe zone.');
     }
   };
+
 
   const handleDeleteSafeZone = async (safeZoneId: string) => {
     if (!token) return;
@@ -565,7 +574,7 @@ const App = () => {
           setCountdownReason(anomaly.reason);
           setCountdownSeconds(5);
           setIsCountdownModalVisible(true);
-          try { Vibration.vibrate([0, 500, 200, 500]); } catch (e) {}
+          try { Vibration.vibrate([0, 500, 200, 500]); } catch (e) { }
           soundService.getSelectedSound().then(snd => soundService.playSound(snd));
 
           if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
@@ -578,7 +587,7 @@ const App = () => {
                 triggerSosSignal(); // Auto-fire emergency SOS broadcast if not cancelled!
                 return 0;
               }
-              try { Vibration.vibrate(200); } catch (e) {}
+              try { Vibration.vibrate(200); } catch (e) { }
               return prev - 1;
             });
           }, 1000);
@@ -644,7 +653,7 @@ const App = () => {
       setLiveLocation(loc);
       if (socketRef.current && socketRef.current.connected) {
         socketRef.current.emit('location_update', {
-          deviceId: devices[0]?.id || 'primary-device',
+          deviceId: devices[0]?.id || '00000000-0000-0000-0000-000000000000',
           ...loc,
         });
       }
@@ -657,9 +666,9 @@ const App = () => {
   // Real-Time GPS location tracking using Google Fused Location Provider API & WebSockets
   useEffect(() => {
     if (token && currentScreen === 'DASHBOARD') {
-      const targetDeviceId = devices.length > 0 && devices[0].id ? devices[0].id : 'primary-device';
+      const targetDeviceId = devices.length > 0 && devices[0].id ? devices[0].id : '00000000-0000-0000-0000-000000000000';
       console.log(`[Fused Location Provider] Initializing live GPS tracking for device ID: ${targetDeviceId}`);
-      
+
       // Ensure Socket.IO client instance exists for socket emission
       if (!socketRef.current) {
         socketRef.current = io(API_BASE_URL, {
@@ -746,6 +755,22 @@ const App = () => {
         },
       ]
     );
+  };
+
+  const handleToggleSharingMode = async (contactId: string, currentMode: 'EMERGENCY_ONLY' | 'ALWAYS_ON') => {
+    if (!token) return;
+    const newMode = currentMode === 'ALWAYS_ON' ? 'EMERGENCY_ONLY' : 'ALWAYS_ON';
+    setLoading(true);
+    const result = await apiService.updateContactSharingMode(token, contactId, newMode);
+    setLoading(false);
+
+    if (result.success && result.data) {
+      setContacts(prev => prev.map(c => c.id === contactId ? { ...c, sharingMode: newMode } : c));
+      const modeLabel = newMode === 'ALWAYS_ON' ? '🌐 Always-On Family Sharing' : '🔒 Emergency-Only SOS Sharing';
+      triggerFeedback(`Location sharing updated to: ${modeLabel}`, false);
+    } else {
+      triggerFeedback(result.message || 'Failed to update contact sharing mode.');
+    }
   };
 
   // SOS Signal Handlers
@@ -1038,6 +1063,7 @@ const App = () => {
             onCalibrateBaseline={handleCalibrateBaseline}
             onUnbindDevice={handleUnbindDevice}
             onDeleteContact={handleDeleteContact}
+            onToggleSharingMode={handleToggleSharingMode}
           />
         )}
 
@@ -1165,43 +1191,32 @@ const App = () => {
         )}
 
         {currentScreen === 'FULLSCREEN_MAP' && (
-          <MapViewComponent
-            latitude={
+          <TacticalSplitMapScreen
+            liveLocation={
               previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
-                ? parseFloat(trackerLogs[0].latitude)
-                : liveLocation?.latitude
-                ? liveLocation.latitude
-                : activeAlert && activeAlert.latitude
-                ? parseFloat(String(activeAlert.latitude))
-                : null
+                ? {
+                  latitude: parseFloat(trackerLogs[0].latitude),
+                  longitude: parseFloat(trackerLogs[0].longitude),
+                  accuracy: trackerLogs[0].accuracy ? parseFloat(trackerLogs[0].accuracy) : 5.0,
+                  speed: trackerLogs[0].speed ? parseFloat(trackerLogs[0].speed) : 0,
+                  heading: trackerLogs[0].heading ? parseFloat(trackerLogs[0].heading) : 0,
+                  altitude: 0,
+                  timestamp: trackerLogs[0].timestamp || new Date().toISOString(),
+                }
+                : liveLocation
             }
-            longitude={
-              previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
-                ? parseFloat(trackerLogs[0].longitude)
-                : liveLocation?.longitude
-                ? liveLocation.longitude
-                : activeAlert && activeAlert.longitude
-                ? parseFloat(String(activeAlert.longitude))
-                : null
-            }
-            accuracy={
-              previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0 && trackerLogs[0].accuracy
-                ? parseFloat(trackerLogs[0].accuracy)
-                : 10.0
-            }
-            logs={previousScreenForMap === 'TRACKER_DASHBOARD' ? trackerLogs : []}
             safeZones={safeZones}
-            targetName={
-              previousScreenForMap === 'TRACKER_DASHBOARD' && trackerInfo
-                ? trackerInfo.targetUser.fullName
-                : user?.fullName || 'Primary Device'
-            }
-            height="100%"
-            isFullScreen={true}
+            activeAlert={activeAlert}
+            isMotionGuardActive={isMotionGuardActive}
             onBack={() => setCurrentScreen(previousScreenForMap || 'DASHBOARD')}
-            onOpenARView={() => setCurrentScreen('AR_VIEW')}
+            onRecenter={handleFetchCurrentLocation}
+            onTriggerSos={triggerSosSignal}
+            onToggleMotionGuard={handleToggleMotionGuard}
+            onNavigateARView={() => setCurrentScreen('AR_VIEW')}
+            onCreateSafeZone={handleCreateSafeZone}
           />
         )}
+
 
         {currentScreen === 'AR_VIEW' && (
           <ARViewComponent
@@ -1211,15 +1226,15 @@ const App = () => {
               previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
                 ? parseFloat(trackerLogs[0].latitude)
                 : activeAlert && activeAlert.latitude
-                ? parseFloat(String(activeAlert.latitude))
-                : null
+                  ? parseFloat(String(activeAlert.latitude))
+                  : null
             }
             targetLongitude={
               previousScreenForMap === 'TRACKER_DASHBOARD' && trackerLogs.length > 0
                 ? parseFloat(trackerLogs[0].longitude)
                 : activeAlert && activeAlert.longitude
-                ? parseFloat(String(activeAlert.longitude))
-                : null
+                  ? parseFloat(String(activeAlert.longitude))
+                  : null
             }
             targetName={
               previousScreenForMap === 'TRACKER_DASHBOARD' && trackerInfo
@@ -1231,6 +1246,14 @@ const App = () => {
         )}
       </Animated.View>
     </SafeAreaView>
+  );
+};
+
+const App = () => {
+  return (
+    <ThemeProvider>
+      <MainApp />
+    </ThemeProvider>
   );
 };
 

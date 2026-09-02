@@ -26,6 +26,9 @@ yarn-error.log*
 *.pem
 *.key
 backend/.env
+backend/config/*firebase*.json
+*firebase*.json
+*-firebase-key.json
 frontend/android/local.properties
 frontend/android/*.keystore
 !frontend/android/debug.keystore

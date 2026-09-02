@@ -98,3 +98,47 @@ exports.deleteContact = async (req, res) => {
         });
     }
 };
+
+/**
+ * @desc    Update location sharing mode for a trusted contact
+ * @route   PUT /api/contacts/:id/sharing-mode
+ * @access  Private
+ */
+exports.updateSharingMode = async (req, res) => {
+    try {
+        const { sharingMode } = req.body;
+        if (!['EMERGENCY_ONLY', 'ALWAYS_ON'].includes(sharingMode)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid sharing mode. Must be EMERGENCY_ONLY or ALWAYS_ON.',
+            });
+        }
+
+        const contact = await TrustedContact.findOne({
+            where: {
+                id: req.params.id,
+                userId: req.user.id
+            }
+        });
+
+        if (!contact) {
+            return res.status(404).json({
+                success: false,
+                message: 'Trusted contact not found or not authorized'
+            });
+        }
+
+        contact.sharingMode = sharingMode;
+        await contact.save();
+
+        res.status(200).json({
+            success: true,
+            data: contact
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};

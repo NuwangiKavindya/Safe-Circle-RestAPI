@@ -1,31 +1,44 @@
 {
   "project_info": {
-    "project_number": "342423658982",
-    "project_id": "safecircleapp-sandbox",
-    "storage_bucket": "safecircleapp-sandbox.appspot.com"
+    "project_number": "302894885438",
+    "project_id": "app1-95e39",
+    "storage_bucket": "app1-95e39.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:342423658982:android:5e8f16062ea3cd2c4a0d54",
+        "mobilesdk_app_id": "1:302894885438:android:64d67a6420c6de49693f6f",
         "android_client_info": {
           "package_name": "com.safecircleapp"
         }
       },
       "oauth_client": [
         {
-          "client_id": "342423658982-dkt3lat80cve8m7kgg92tl4b13iioqtn.apps.googleusercontent.com",
+          "client_id": "302894885438-8gaig5o9sv739483erahdgeacbgm4aul.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.safecircleapp",
+            "certificate_hash": "14f6acb2c38261f8f2beb50582940b2ccce8ac0c"
+          }
+        },
+        {
+          "client_id": "302894885438-bds6snndbttnu7eu29hjej4u1mq3fp66.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyDummyKeyForSandboxTesting"
+          "current_key": "AIzaSyCrOWo0YYa2AfN4S8U0lLUjNy4j7IboD1U"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "302894885438-bds6snndbttnu7eu29hjej4u1mq3fp66.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

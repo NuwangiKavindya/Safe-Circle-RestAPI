@@ -42,13 +42,15 @@ interface DashboardScreenProps {
   onNavigateAddContact: () => void;
   onNavigateFullScreenMap?: () => void;
   onFetchCurrentLocation?: () => void;
-  onCreateSafeZone?: (zoneName: string, radiusMeters: number) => void;
+  onCreateSafeZone?: (zoneName: string, radiusMeters: number, latitude?: number, longitude?: number) => void;
   onDeleteSafeZone?: (safeZoneId: string) => void;
+
   onToggleMotionGuard?: (active: boolean) => void;
   onSelectSensitivityMode?: (mode: SensitivityMode) => void;
   onCalibrateBaseline?: () => void;
   onUnbindDevice: (deviceId: string) => void;
   onDeleteContact: (contactId: string) => void;
+  onToggleSharingMode?: (contactId: string, currentMode: 'EMERGENCY_ONLY' | 'ALWAYS_ON') => void;
 }
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({
@@ -79,6 +81,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onCalibrateBaseline,
   onUnbindDevice,
   onDeleteContact,
+  onToggleSharingMode,
 }) => {
   // Safe Zone Form State
   const [newZoneName, setNewZoneName] = React.useState('');
@@ -359,7 +362,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           targetName={user?.fullName || 'Primary Device'}
           height={260}
           onExpandFullScreen={onNavigateFullScreenMap}
+          onCreateSafeZone={onCreateSafeZone}
         />
+
       </View>
 
       {/* Devices Section */}
@@ -405,7 +410,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           </View>
         ) : (
           contacts.map((contact, index) => (
-            <ContactCard key={contact.id || index} contact={contact} onDelete={onDeleteContact} />
+            <ContactCard
+              key={contact.id || index}
+              contact={contact}
+              onDelete={onDeleteContact}
+              onToggleSharingMode={onToggleSharingMode}
+            />
           ))
         )}
       </View>

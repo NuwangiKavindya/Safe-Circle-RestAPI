@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
+import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 import { Marker } from '@maplibre/maplibre-react-native';
 import {
   Coordinate,
@@ -8,8 +8,10 @@ import {
   calculateDistanceMeters,
   cubicOutEasing,
 } from '../utils/markerInterpolator';
+import { useTheme } from '../context/ThemeContext';
 
 interface SmoothAnimatedMarkerProps {
+
   id: string;
   targetCoordinate: Coordinate;
   durationMs?: number;
@@ -18,6 +20,7 @@ interface SmoothAnimatedMarkerProps {
   showHeadingArrow?: boolean;
   maxAccuracyThresholdMeters?: number; // Filter low accuracy fixes (> 35m)
   maxJumpThresholdMeters?: number;     // Instant snap if distance > 300m
+  onPress?: () => void;
 }
 
 export const SmoothAnimatedMarker: React.FC<SmoothAnimatedMarkerProps> = ({
@@ -29,7 +32,9 @@ export const SmoothAnimatedMarker: React.FC<SmoothAnimatedMarkerProps> = ({
   showHeadingArrow = true,
   maxAccuracyThresholdMeters = 35,
   maxJumpThresholdMeters = 300,
+  onPress,
 }) => {
+  const { theme } = useTheme();
   const [currentCoordinate, setCurrentCoordinate] = useState<Coordinate>(targetCoordinate);
   const [bearing, setBearing] = useState<number>(0);
 
@@ -121,8 +126,14 @@ export const SmoothAnimatedMarker: React.FC<SmoothAnimatedMarkerProps> = ({
     <Marker
       id={id}
       lngLat={[currentCoordinate.longitude, currentCoordinate.latitude]}
+      onTouchStart={onPress}
+      onTouchEnd={onPress}
     >
-      <View style={styles.markerContainer}>
+      <TouchableOpacity
+        style={styles.markerContainer}
+        onPress={onPress}
+        activeOpacity={0.7}
+      >
         {/* Pulsing Outer Halo Ring */}
         <Animated.View
           style={[
@@ -147,13 +158,13 @@ export const SmoothAnimatedMarker: React.FC<SmoothAnimatedMarkerProps> = ({
 
         {/* Optional Title Badge */}
         {title && (
-          <View style={styles.titleBadge}>
-            <Text style={styles.titleText} numberOfLines={1}>
+          <View style={[styles.titleBadge, { backgroundColor: theme.mapMarkerTitleBg, borderColor: theme.mapMarkerTitleBorder }]}>
+            <Text style={[styles.titleText, { color: theme.mapMarkerTitleText }]} numberOfLines={1}>
               {title}
             </Text>
           </View>
         )}
-      </View>
+      </TouchableOpacity>
     </Marker>
   );
 };
