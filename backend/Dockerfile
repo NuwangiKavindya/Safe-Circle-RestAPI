@@ -1,5 +1,5 @@
 # Multi-stage production Dockerfile for Safe-Circle Backend
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 
 # Install necessary runtime dependencies (e.g. for native build tools if any)
 RUN apk add --no-cache libc6-compat curl

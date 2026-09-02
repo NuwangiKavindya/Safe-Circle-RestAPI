@@ -20,10 +20,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
 
@@ -55,8 +55,9 @@ jobs:
           username: ${{ secrets.EC2_USER || 'ubuntu' }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
-          script_stop: true
+          script_stop: false
           script: |
+            set -e
             echo "=========================================="
             echo " Starting Safe-Circle Deployment on EC2"
             echo "=========================================="
@@ -79,32 +80,27 @@ jobs:
 
             cd "$APP_DIR"
 
-            # 2. Generate backend .env file (Only essential secrets required from GitHub)
+            # 2. Generate backend .env file line-by-line
             echo "[INFO] Writing backend environment configuration..."
-            cat << 'EOF' > "$APP_DIR/backend/.env"
-            PORT=5001
-            NODE_ENV=production
-            DB_HOST=${{ secrets.DB_HOST }}
-            DB_PORT=5432
-            DB_NAME=safe_circle
-            DB_USER=safe_circle_user
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            JWT_SECRET=${{ secrets.JWT_SECRET || '209fd6ed0d7e0ad73c59ede5b480bb688bc87e90a249fd6db1450f9ea934fd90' }}
-            JWT_EXPIRE_DAYS=30
-            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID || '' }}
-            GOOGLE_WEB_CLIENT_ID=${{ secrets.GOOGLE_WEB_CLIENT_ID || '' }}
-            GOOGLE_IOS_CLIENT_ID=${{ secrets.GOOGLE_IOS_CLIENT_ID || '' }}
-            GOOGLE_ANDROID_CLIENT_ID=${{ secrets.GOOGLE_ANDROID_CLIENT_ID || '' }}
-            SMTP_HOST=smtp.gmail.com
-            SMTP_PORT=587
-            SMTP_SECURE=false
-            SMTP_USER=${{ secrets.SMTP_USER || '' }}
-            SMTP_PASS=${{ secrets.SMTP_PASS || '' }}
-            SMTP_FROM=no-reply@safecircle.com
-            EOF
-
-            # Clean any leading spaces in the generated .env file
-            sed -i 's/^[ \t]*//' "$APP_DIR/backend/.env"
+            echo "PORT=5001" > "$APP_DIR/backend/.env"
+            echo "NODE_ENV=production" >> "$APP_DIR/backend/.env"
+            echo "DB_HOST=${{ secrets.DB_HOST }}" >> "$APP_DIR/backend/.env"
+            echo "DB_PORT=5432" >> "$APP_DIR/backend/.env"
+            echo "DB_NAME=safe_circle" >> "$APP_DIR/backend/.env"
+            echo "DB_USER=safe_circle_user" >> "$APP_DIR/backend/.env"
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> "$APP_DIR/backend/.env"
+            echo "JWT_SECRET=${{ secrets.JWT_SECRET || '209fd6ed0d7e0ad73c59ede5b480bb688bc87e90a249fd6db1450f9ea934fd90' }}" >> "$APP_DIR/backend/.env"
+            echo "JWT_EXPIRE_DAYS=30" >> "$APP_DIR/backend/.env"
+            echo "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID || '' }}" >> "$APP_DIR/backend/.env"
+            echo "GOOGLE_WEB_CLIENT_ID=${{ secrets.GOOGLE_WEB_CLIENT_ID || '' }}" >> "$APP_DIR/backend/.env"
+            echo "GOOGLE_IOS_CLIENT_ID=${{ secrets.GOOGLE_IOS_CLIENT_ID || '' }}" >> "$APP_DIR/backend/.env"
+            echo "GOOGLE_ANDROID_CLIENT_ID=${{ secrets.GOOGLE_ANDROID_CLIENT_ID || '' }}" >> "$APP_DIR/backend/.env"
+            echo "SMTP_HOST=smtp.gmail.com" >> "$APP_DIR/backend/.env"
+            echo "SMTP_PORT=587" >> "$APP_DIR/backend/.env"
+            echo "SMTP_SECURE=false" >> "$APP_DIR/backend/.env"
+            echo "SMTP_USER=${{ secrets.SMTP_USER || '' }}" >> "$APP_DIR/backend/.env"
+            echo "SMTP_PASS=${{ secrets.SMTP_PASS || '' }}" >> "$APP_DIR/backend/.env"
+            echo "SMTP_FROM=no-reply@safecircle.com" >> "$APP_DIR/backend/.env"
 
             # 3. Build and restart Docker containers
             echo "[INFO] Rebuilding and launching Docker containers..."
