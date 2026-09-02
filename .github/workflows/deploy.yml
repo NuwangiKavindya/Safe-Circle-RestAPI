@@ -1,0 +1,120 @@
+name: Deploy Safe-Circle Backend to AWS EC2
+
+on:
+  push:
+    branches:
+      - production-env
+    paths:
+      - 'backend/**'
+      - 'docker-compose.yml'
+      - 'nginx/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build & Test Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ./backend
+        run: |
+          npm ci
+
+      - name: Verify Backend Syntax
+        working-directory: ./backend
+        run: |
+          node -c server.js
+          node -c config/db.js
+          echo "Node.js syntax validation passed successfully."
+
+  deploy-to-ec2:
+    name: Deploy to AWS EC2
+    needs: build-and-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Execute Remote Deployment via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER || 'ubuntu' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script_stop: false
+          script: |
+            set -e
+            echo "=========================================="
+            echo " Starting Safe-Circle Deployment on EC2"
+            echo "=========================================="
+
+            APP_DIR="/opt/safe-circle"
+
+            # 1. Initialize or update Git repository
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "[INFO] Cloning repository into $APP_DIR..."
+              sudo rm -rf "$APP_DIR"
+              sudo git clone -b ${{ github.ref_name }} https://github.com/${{ github.repository }}.git "$APP_DIR"
+              sudo chown -R ubuntu:ubuntu "$APP_DIR"
+            else
+              echo "[INFO] Pulling latest changes from ${{ github.ref_name }} branch..."
+              cd "$APP_DIR"
+              git fetch --all
+              git checkout ${{ github.ref_name }}
+              git reset --hard origin/${{ github.ref_name }}
+            fi
+
+            cd "$APP_DIR"
+
+            # 2. Generate backend .env file line-by-line
+            echo "[INFO] Writing backend environment configuration..."
+            echo "PORT=5001" > "$APP_DIR/backend/.env"
+            echo "NODE_ENV=production" >> "$APP_DIR/backend/.env"
+            echo "DB_HOST=${{ secrets.DB_HOST }}" >> "$APP_DIR/backend/.env"
+            echo "DB_PORT=5432" >> "$APP_DIR/backend/.env"
+            echo "DB_NAME=safe_circle" >> "$APP_DIR/backend/.env"
+            echo "DB_USER=safe_circle_user" >> "$APP_DIR/backend/.env"
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> "$APP_DIR/backend/.env"
+            echo "JWT_SECRET=${{ secrets.JWT_SECRET || '209fd6ed0d7e0ad73c59ede5b480bb688bc87e90a249fd6db1450f9ea934fd90' }}" >> "$APP_DIR/backend/.env"
+            echo "JWT_EXPIRE_DAYS=30" >> "$APP_DIR/backend/.env"
+            echo "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID || '' }}" >> "$APP_DIR/backend/.env"
+            echo "GOOGLE_WEB_CLIENT_ID=${{ secrets.GOOGLE_WEB_CLIENT_ID || '' }}" >> "$APP_DIR/backend/.env"
+            echo "GOOGLE_IOS_CLIENT_ID=${{ secrets.GOOGLE_IOS_CLIENT_ID || '' }}" >> "$APP_DIR/backend/.env"
+            echo "GOOGLE_ANDROID_CLIENT_ID=${{ secrets.GOOGLE_ANDROID_CLIENT_ID || '' }}" >> "$APP_DIR/backend/.env"
+            echo "SMTP_HOST=smtp.gmail.com" >> "$APP_DIR/backend/.env"
+            echo "SMTP_PORT=587" >> "$APP_DIR/backend/.env"
+            echo "SMTP_SECURE=false" >> "$APP_DIR/backend/.env"
+            echo "SMTP_USER=${{ secrets.SMTP_USER || '' }}" >> "$APP_DIR/backend/.env"
+            echo "SMTP_PASS=${{ secrets.SMTP_PASS || '' }}" >> "$APP_DIR/backend/.env"
+            echo "SMTP_FROM=no-reply@safecircle.com" >> "$APP_DIR/backend/.env"
+
+            # 3. Build and restart Docker containers
+            echo "[INFO] Rebuilding and launching Docker containers..."
+            docker compose -f docker-compose.yml down --remove-orphans || true
+            docker compose -f docker-compose.yml up -d --build --remove-orphans
+
+            # 4. Prune unused images to preserve disk space on t3.micro
+            echo "[INFO] Cleaning up dangling docker images..."
+            docker image prune -f
+
+            # 5. Verify deployment health
+            echo "[INFO] Verifying container health..."
+            sleep 10
+            docker compose ps
+            echo "=========================================="
+            echo " Deployment Finished Successfully!"
+            echo "=========================================="

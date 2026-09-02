@@ -46,7 +46,8 @@ const sendEmail = async (to, subject, text, html) => {
  * Dispatch SOS alerts to all registered trusted contacts of a user
  */
 const dispatchSosNotifications = async (user, contacts, alert) => {
-    const alertLink = `http://localhost:${process.env.PORT || 5001}/track.html?code=`;
+    const baseUrl = process.env.BASE_URL || process.env.SERVER_URL || `http://localhost:${process.env.PORT || 5001}`;
+    const alertLink = `${baseUrl}/track.html?code=`;
 
     for (const contact of contacts) {
         const personalLink = `${alertLink}${contact.accessCode}`;
