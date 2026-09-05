@@ -63,7 +63,7 @@ export const TrackerAuthScreen: React.FC<TrackerAuthScreenProps> = ({
             { backgroundColor: COLORS.accentGreen },
             loading && globalStyles.disabledButton,
           ]}
-          onPress={() => onVerifyTrackerCode()}
+          onPress={() => onVerifyTrackerCode(trackerCode)}
           disabled={loading}
         >
           {loading ? (

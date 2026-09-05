@@ -20,6 +20,7 @@ import {
   SignInFormState,
   DeviceFormState,
   ContactFormState,
+  GuardianshipWard,
 } from './src/types';
 import { globalStyles } from './src/styles/theme';
 import { FeedbackBanner } from './src/components/FeedbackBanner';
@@ -46,6 +47,7 @@ const MainApp = () => {
   const [user, setUser] = useState<UserData | null>(null);
   const [devices, setDevices] = useState<BoundDevice[]>([]);
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
+  const [guardianshipList, setGuardianshipList] = useState<GuardianshipWard[]>([]);
   const [safeZones, setSafeZones] = useState<SafeZone[]>([]);
   const [liveLocation, setLiveLocation] = useState<LocationCoordinates | null>(null);
   const [activeAlert, setActiveAlert] = useState<ApiAlert | null>(null);
@@ -447,11 +449,12 @@ const MainApp = () => {
     if (token) {
       const loadInitialData = async () => {
         setLoading(true);
-        const [cRes, dRes, aRes, zRes] = await Promise.all([
+        const [cRes, dRes, aRes, zRes, gRes] = await Promise.all([
           apiService.getContacts(token),
           apiService.getDevices(token),
           apiService.getActiveAlerts(token),
           apiService.getSafeZones(token),
+          apiService.getGuardianshipList(token),
         ]);
         setLoading(false);
 
@@ -459,6 +462,10 @@ const MainApp = () => {
           setContacts(cRes.data);
         } else if (!cRes.success) {
           triggerFeedback(cRes.message || 'Failed to load safety contacts.');
+        }
+
+        if (gRes.success && gRes.data) {
+          setGuardianshipList(gRes.data);
         }
 
         if (dRes.success && dRes.data) {
@@ -488,6 +495,7 @@ const MainApp = () => {
       loadInitialData();
     } else {
       setContacts([]);
+      setGuardianshipList([]);
       setDevices([]);
       setSafeZones([]);
       setActiveAlert(null);
@@ -871,8 +879,9 @@ const MainApp = () => {
     setLoading(false);
 
     if (result.success && result.data) {
-      if (!result.data.isActiveSos) {
-        triggerFeedback('Access Denied: This access code is active, but the user is not in an active SOS emergency state.');
+      const isAlwaysOn = result.data.sharingMode === 'ALWAYS_ON';
+      if (!result.data.isActiveSos && !isAlwaysOn) {
+        triggerFeedback('Access Denied: Location sharing is set to Emergency-Only and the user is not currently in an active SOS emergency state.');
         return;
       }
       setTrackerInfo(result.data);
@@ -894,7 +903,8 @@ const MainApp = () => {
       const pollTrackerUpdates = async () => {
         const verifyRes = await apiService.verifyAccessCode(trackerCode);
         if (verifyRes.success && verifyRes.data) {
-          if (!verifyRes.data.isActiveSos) {
+          const isAlwaysOn = verifyRes.data.sharingMode === 'ALWAYS_ON';
+          if (!verifyRes.data.isActiveSos && !isAlwaysOn) {
             triggerFeedback('Emergency SOS has been resolved by the user.', false);
             setCurrentScreen('WELCOME');
             setTrackerInfo(null);
@@ -1064,6 +1074,11 @@ const MainApp = () => {
             onUnbindDevice={handleUnbindDevice}
             onDeleteContact={handleDeleteContact}
             onToggleSharingMode={handleToggleSharingMode}
+            guardianshipList={guardianshipList}
+            onTrackWard={(accessCode: string) => {
+              setTrackerCode(accessCode);
+              handleVerifyTrackerCode(accessCode);
+            }}
           />
         )}
 

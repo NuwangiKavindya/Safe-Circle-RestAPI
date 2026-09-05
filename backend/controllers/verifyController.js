@@ -47,6 +47,18 @@ exports.verifyAccessCode = async (req, res) => {
             }
         });
 
+        // Resolve user deviceId from active alert or user's registered device
+        let deviceId = activeAlert ? activeAlert.deviceId : null;
+        if (!deviceId) {
+            const userDevice = await Device.findOne({
+                where: { userId: contact.userId },
+                order: [['updatedAt', 'DESC']]
+            });
+            if (userDevice) {
+                deviceId = userDevice.id;
+            }
+        }
+
         res.status(200).json({
             success: true,
             data: {
@@ -60,7 +72,7 @@ exports.verifyAccessCode = async (req, res) => {
                 },
                 isActiveSos: !!activeAlert,
                 alertId: activeAlert ? activeAlert.id : null,
-                deviceId: activeAlert ? activeAlert.deviceId : null,
+                deviceId: deviceId,
                 audioFileUrl: activeAlert ? activeAlert.audioFileUrl : null
             }
         });

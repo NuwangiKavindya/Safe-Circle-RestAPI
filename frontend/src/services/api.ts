@@ -1,8 +1,12 @@
 import { Platform } from 'react-native';
+import { API_BASE_URL as ENV_API_BASE_URL } from '@env';
 
-// Standard local port is 5001. Android emulators access localhost via 10.0.2.2.
-const LOCAL_HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-export const API_BASE_URL = `http://${LOCAL_HOST}:5001`;
+// Default Fallbacks
+export const LIVE_SERVER_URL = 'http://35.154.31.80';
+export const LOCAL_SERVER_URL = `http://${Platform.OS === 'android' ? '10.0.2.2' : 'localhost'}:5001`;
+
+// Active backend URL: Loaded dynamically from frontend/.env (defaults to LIVE_SERVER_URL if undefined)
+export const API_BASE_URL = ENV_API_BASE_URL || LIVE_SERVER_URL;
 
 export interface RegisterPayload {
   fullName: string;
@@ -70,6 +74,35 @@ export interface ContactResponse {
   success: boolean;
   message?: string;
   data?: TrustedContact;
+}
+
+export interface GuardianshipWard {
+  contactId: string;
+  accessCode: string;
+  relationship?: string;
+  sharingMode: 'EMERGENCY_ONLY' | 'ALWAYS_ON';
+  isVerified: boolean;
+  isActiveSos: boolean;
+  wardUser: {
+    id: string;
+    fullName: string;
+    phoneNumber: string;
+    email: string;
+  };
+  alertDetails?: {
+    id: string;
+    alertType: string;
+    latitude: number;
+    longitude: number;
+    createdAt: string;
+  } | null;
+}
+
+export interface GuardianshipListResponse {
+  success: boolean;
+  message?: string;
+  count?: number;
+  data?: GuardianshipWard[];
 }
 
 export interface ContactListResponse {
@@ -185,6 +218,7 @@ export interface VerifyCodeResponse {
   data?: {
     contactName: string;
     relationship: string;
+    sharingMode?: 'EMERGENCY_ONLY' | 'ALWAYS_ON';
     targetUser: {
       id: string;
       fullName: string;
@@ -465,6 +499,39 @@ class ApiService {
         return {
           success: false,
           message: data.message || 'Failed to fetch contacts',
+        };
+      }
+
+      return {
+        success: true,
+        count: data.count,
+        data: data.data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Network error occurred',
+      };
+    }
+  }
+
+  /**
+   * Fetch all users who have added the logged-in user as their trusted contact (Guardianship Circle)
+   */
+  async getGuardianshipList(token: string): Promise<GuardianshipListResponse> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/contacts/guardianship`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Failed to fetch guardianship list',
         };
       }
 

@@ -14,7 +14,7 @@ import { DeviceCard } from '../components/DeviceCard';
 import { ContactCard } from '../components/ContactCard';
 import { MapViewComponent } from '../components/MapViewComponent';
 import { AlarmSoundSelectorComponent } from '../components/AlarmSoundSelectorComponent';
-import { UserData, BoundDevice, TrustedContact, ApiAlert } from '../types';
+import { UserData, BoundDevice, TrustedContact, ApiAlert, GuardianshipWard } from '../types';
 import { SafeZone } from '../services/api';
 import { LocationCoordinates } from '../services/locationService';
 import { globalStyles, COLORS } from '../styles/theme';
@@ -51,6 +51,8 @@ interface DashboardScreenProps {
   onUnbindDevice: (deviceId: string) => void;
   onDeleteContact: (contactId: string) => void;
   onToggleSharingMode?: (contactId: string, currentMode: 'EMERGENCY_ONLY' | 'ALWAYS_ON') => void;
+  guardianshipList?: GuardianshipWard[];
+  onTrackWard?: (accessCode: string) => void;
 }
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({
@@ -82,7 +84,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onUnbindDevice,
   onDeleteContact,
   onToggleSharingMode,
+  guardianshipList = [],
+  onTrackWard,
 }) => {
+  // Safety Circle Active Tab: 'GUARDIANS' (My Protectors) or 'WARDS' (People I Protect)
+  const [activeCircleTab, setActiveCircleTab] = React.useState<'GUARDIANS' | 'WARDS'>('GUARDIANS');
+
   // Safe Zone Form State
   const [newZoneName, setNewZoneName] = React.useState('');
   const [newZoneRadius, setNewZoneRadius] = React.useState(200);
@@ -395,28 +402,163 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <View style={styles.devicesSection}>
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionHeading}>Safety Circle</Text>
-          <TouchableOpacity style={styles.addButtonMini} onPress={onNavigateAddContact}>
-            <Text style={styles.addButtonMiniText}>+ Add Contact</Text>
+          {activeCircleTab === 'GUARDIANS' && (
+            <TouchableOpacity style={styles.addButtonMini} onPress={onNavigateAddContact}>
+              <Text style={styles.addButtonMiniText}>+ Add Contact</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Segmented Tab Selector */}
+        <View style={styles.circleSegmentContainer}>
+          <TouchableOpacity
+            style={[
+              styles.circleSegmentButton,
+              activeCircleTab === 'GUARDIANS' && styles.circleSegmentButtonActive,
+            ]}
+            onPress={() => setActiveCircleTab('GUARDIANS')}
+          >
+            <Text
+              style={[
+                styles.circleSegmentText,
+                activeCircleTab === 'GUARDIANS' && styles.circleSegmentTextActive,
+              ]}
+            >
+              🛡️ My Guardians ({contacts.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.circleSegmentButton,
+              activeCircleTab === 'WARDS' && styles.circleSegmentButtonActive,
+            ]}
+            onPress={() => setActiveCircleTab('WARDS')}
+          >
+            <Text
+              style={[
+                styles.circleSegmentText,
+                activeCircleTab === 'WARDS' && styles.circleSegmentTextActive,
+              ]}
+            >
+              👥 People I Protect ({guardianshipList.length})
+            </Text>
           </TouchableOpacity>
         </View>
 
-        {contacts.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyTextIcon}>👥</Text>
-            <Text style={styles.emptyText}>No trusted contacts added yet.</Text>
-            <TouchableOpacity style={styles.linkButton} onPress={onNavigateAddContact}>
-              <Text style={styles.linkButtonText}>Add a trusted contact now</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          contacts.map((contact, index) => (
-            <ContactCard
-              key={contact.id || index}
-              contact={contact}
-              onDelete={onDeleteContact}
-              onToggleSharingMode={onToggleSharingMode}
-            />
-          ))
+        {/* Tab 1: My Guardians */}
+        {activeCircleTab === 'GUARDIANS' && (
+          contacts.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTextIcon}>👥</Text>
+              <Text style={styles.emptyText}>No trusted contacts added yet.</Text>
+              <TouchableOpacity style={styles.linkButton} onPress={onNavigateAddContact}>
+                <Text style={styles.linkButtonText}>Add a trusted contact now</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            contacts.map((contact, index) => (
+              <ContactCard
+                key={contact.id || index}
+                contact={contact}
+                onDelete={onDeleteContact}
+                onToggleSharingMode={onToggleSharingMode}
+              />
+            ))
+          )
+        )}
+
+        {/* Tab 2: People I Protect (Guardianship Wards) */}
+        {activeCircleTab === 'WARDS' && (
+          guardianshipList.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTextIcon}>🛡️</Text>
+              <Text style={styles.emptyText}>No circle members have added you yet.</Text>
+              <Text style={[styles.emptyText, { fontSize: 12, marginTop: -4, color: COLORS.textMuted }]}>
+                When family or contacts add your phone number ({user?.phoneNumber || 'or email'}) as their trusted person, they will appear here.
+              </Text>
+            </View>
+          ) : (
+            guardianshipList.map((ward, index) => {
+              const canTrack = ward.isActiveSos || ward.sharingMode === 'ALWAYS_ON';
+
+              return (
+                <View
+                  key={ward.contactId || index}
+                  style={[
+                    styles.wardCard,
+                    ward.isActiveSos && styles.wardCardSosActive,
+                  ]}
+                >
+                  <View style={styles.wardHeaderRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.wardName}>👤 {ward.wardUser.fullName}</Text>
+                      <Text style={styles.wardSubDetail}>
+                        📞 {ward.wardUser.phoneNumber || 'No phone'} • 🤝 {ward.relationship || 'Circle Member'}
+                      </Text>
+                    </View>
+                    {ward.isActiveSos && (
+                      <View style={styles.sosBlinkingBadge}>
+                        <Text style={styles.sosBlinkingBadgeText}>🚨 SOS ACTIVE</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Mode & Status Badge */}
+                  <View style={styles.wardStatusRow}>
+                    <View
+                      style={[
+                        styles.wardModeBadge,
+                        ward.isActiveSos
+                          ? { backgroundColor: COLORS.accentRedBg, borderColor: COLORS.accentRed }
+                          : ward.sharingMode === 'ALWAYS_ON'
+                          ? { backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: COLORS.accentGreen }
+                          : { backgroundColor: 'rgba(99, 102, 241, 0.15)', borderColor: '#6366F1' },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.wardModeBadgeText,
+                          ward.isActiveSos
+                            ? { color: '#FCA5A5' }
+                            : ward.sharingMode === 'ALWAYS_ON'
+                            ? { color: '#6EE7B7' }
+                            : { color: '#A5B4FC' },
+                        ]}
+                      >
+                        {ward.isActiveSos
+                          ? '🚨 Emergency SOS Triggered'
+                          : ward.sharingMode === 'ALWAYS_ON'
+                          ? '🟢 Always-On Live Location Active'
+                          : '🔒 Standby (Emergency Only)'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* 1-Tap Action Button */}
+                  {canTrack ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.wardTrackButton,
+                        ward.isActiveSos ? { backgroundColor: COLORS.accentRedDark, borderColor: COLORS.accentRed } : {},
+                      ]}
+                      onPress={() => onTrackWard && onTrackWard(ward.accessCode)}
+                    >
+                      <Text style={styles.wardTrackButtonText}>
+                        {ward.isActiveSos ? '🚨 Open Live Incident Radar (1-Tap)' : '🛰️ Open Live Location Map'}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.wardStandbyContainer}>
+                      <Text style={styles.wardStandbyText}>
+                        ℹ️ Live tracking unlocks automatically when an SOS emergency is triggered.
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })
+          )
         )}
       </View>
 
@@ -728,5 +870,115 @@ const styles = StyleSheet.create({
     color: COLORS.accentGreen,
     fontSize: 11,
     fontWeight: '700',
+  },
+  circleSegmentContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderDark,
+  },
+  circleSegmentButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  circleSegmentButtonActive: {
+    backgroundColor: COLORS.indigoBg,
+    borderWidth: 1,
+    borderColor: COLORS.accentCyan,
+  },
+  circleSegmentText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  circleSegmentTextActive: {
+    color: COLORS.accentCyan,
+    fontWeight: '800',
+  },
+  wardCard: {
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderDark,
+  },
+  wardCardSosActive: {
+    borderColor: COLORS.accentRed,
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+  },
+  wardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 6,
+  },
+  wardName: {
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  wardSubDetail: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  sosBlinkingBadge: {
+    backgroundColor: COLORS.accentRed,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  sosBlinkingBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  wardStatusRow: {
+    marginVertical: 8,
+  },
+  wardModeBadge: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+  },
+  wardModeBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  wardTrackButton: {
+    backgroundColor: COLORS.accentGreen,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#34D399',
+  },
+  wardTrackButtonText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  wardStandbyContainer: {
+    backgroundColor: 'rgba(30, 41, 59, 0.6)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  wardStandbyText: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });

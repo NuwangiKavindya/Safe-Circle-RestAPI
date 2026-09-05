@@ -1,4 +1,7 @@
+const { Op } = require('sequelize');
 const TrustedContact = require('../models/TrustedContact');
+const User = require('../models/User');
+const Alert = require('../models/Alert');
 
 /**
  * @desc    Add a trusted contact
@@ -60,6 +63,110 @@ exports.getContacts = async (req, res) => {
         res.status(500).json({
             success: false,
             message: error.message,
+        });
+    }
+};
+
+/**
+ * @desc    Get all users who have added the logged-in user as their trusted contact (Guardianship Circle)
+ * @route   GET /api/contacts/guardianship
+ * @access  Private
+ */
+exports.getGuardianshipContacts = async (req, res) => {
+    try {
+        const currentUser = req.user;
+
+        const phoneVariants = [];
+        if (currentUser.phoneNumber) {
+            const rawPhone = currentUser.phoneNumber.trim();
+            phoneVariants.push(rawPhone);
+            if (rawPhone.startsWith('+')) {
+                phoneVariants.push(rawPhone.slice(1));
+            }
+            if (rawPhone.startsWith('0')) {
+                phoneVariants.push(rawPhone.slice(1));
+            }
+        }
+
+        const orConditions = [];
+        phoneVariants.forEach(p => {
+            orConditions.push({ contactPhone: { [Op.iLike]: `%${p}%` } });
+        });
+
+        if (currentUser.email) {
+            orConditions.push({ contactEmail: { [Op.iLike]: currentUser.email.trim() } });
+        }
+
+        if (orConditions.length === 0) {
+            return res.status(200).json({
+                success: true,
+                count: 0,
+                data: []
+            });
+        }
+
+        // 1. Find all contact entries where the phone or email matches the current user
+        const contacts = await TrustedContact.findAll({
+            where: {
+                [Op.or]: orConditions
+            },
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'fullName', 'email', 'phoneNumber']
+                }
+            ],
+            order: [['createdAt', 'DESC']]
+        });
+
+        // 2. Fetch active emergency SOS status for each ward
+        const wardUserIds = contacts.map(c => c.userId);
+        const activeAlerts = await Alert.findAll({
+            where: {
+                userId: wardUserIds,
+                status: 'ACTIVE'
+            }
+        });
+
+        const activeAlertMap = new Map();
+        activeAlerts.forEach(a => activeAlertMap.set(a.userId, a));
+
+        // 3. Format response payload
+        const formattedData = contacts.map(contact => {
+            const activeAlert = activeAlertMap.get(contact.userId);
+            return {
+                contactId: contact.id,
+                accessCode: contact.accessCode,
+                relationship: contact.relationship,
+                sharingMode: contact.sharingMode || 'EMERGENCY_ONLY',
+                isVerified: contact.isVerified,
+                wardUser: {
+                    id: contact.user ? contact.user.id : contact.userId,
+                    fullName: contact.user ? contact.user.fullName : contact.contactName,
+                    phoneNumber: contact.user ? contact.user.phoneNumber : '',
+                    email: contact.user ? contact.user.email : ''
+                },
+                isActiveSos: !!activeAlert,
+                alertDetails: activeAlert ? {
+                    id: activeAlert.id,
+                    alertType: activeAlert.alertType,
+                    latitude: activeAlert.latitude,
+                    longitude: activeAlert.longitude,
+                    createdAt: activeAlert.createdAt
+                } : null
+            };
+        });
+
+        res.status(200).json({
+            success: true,
+            count: formattedData.length,
+            data: formattedData
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
         });
     }
 };

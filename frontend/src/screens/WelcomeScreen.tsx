@@ -12,6 +12,7 @@ import {
 import { PasswordInput } from '../components/PasswordInput';
 import { SignInFormState } from '../types';
 import { globalStyles, COLORS } from '../styles/theme';
+import { API_BASE_URL } from '../services/api';
 
 interface WelcomeScreenProps {
   signInForm: SignInFormState;
@@ -110,7 +111,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         </TouchableOpacity>
 
         <View style={styles.metaInfo}>
-          <Text style={styles.metaText}>Backend Port: 5001</Text>
+          <Text style={styles.metaText}>Server: {API_BASE_URL.replace(/^https?:\/\//, '')}</Text>
           <Text style={styles.metaText}>Status: Connected to Database</Text>
         </View>
       </View>
