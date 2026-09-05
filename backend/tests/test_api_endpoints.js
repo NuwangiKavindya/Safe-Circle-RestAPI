@@ -138,8 +138,8 @@ async function main() {
     return `Found ${data.data.length} registered device(s)`;
   });
 
-  // 7. Add Trusted Contact
-  await runStep('Add Trusted Contact (POST /api/contacts)', async () => {
+  // 7. Add Trusted Contact (Unregistered User -> Prioritizes Email Invitation)
+  await runStep('Add Trusted Contact (POST /api/contacts - Priority Email Route)', async () => {
     const { status, ok, data } = await request('/api/contacts', {
       method: 'POST',
       body: JSON.stringify({
@@ -150,9 +150,32 @@ async function main() {
       }),
     });
     if (!ok || !data?.data?.id) throw new Error(data?.message || `HTTP ${status}`);
+    if (data.delivery?.deliveryChannel !== 'EMAIL_INVITATION' || data.delivery?.isRegisteredUser !== false) {
+      throw new Error(`Expected EMAIL_INVITATION delivery, got: ${JSON.stringify(data.delivery)}`);
+    }
     testContactId = data.data.id;
     testAccessCode = data.data.accessCode;
-    return `Created Contact ID: ${testContactId} with 6-digit code: ${testAccessCode}`;
+    return `Created Contact ID: ${testContactId} (Route: ${data.delivery.deliveryChannel}, Code: ${testAccessCode})`;
+  });
+
+  // 7b. Add Registered Trusted Contact -> Prioritizes In-App Push Notification
+  await runStep('Add Registered Contact (POST /api/contacts - Priority In-App Push Route)', async () => {
+    const { status, ok, data } = await request('/api/contacts', {
+      method: 'POST',
+      body: JSON.stringify({
+        contactName: 'Self / Registered Guardian',
+        contactPhone: testUser.phoneNumber,
+        contactEmail: testUser.email,
+        relationship: 'Partner',
+      }),
+    });
+    if (!ok || !data?.data?.id) throw new Error(data?.message || `HTTP ${status}`);
+    if (data.delivery?.deliveryChannel !== 'PUSH_NOTIFICATION' || data.delivery?.isRegisteredUser !== true) {
+      throw new Error(`Expected PUSH_NOTIFICATION delivery for registered member, got: ${JSON.stringify(data.delivery)}`);
+    }
+    // Clean up this second contact right away so other tests maintain clean state
+    await request(`/api/contacts/${data.data.id}`, { method: 'DELETE' });
+    return `Verified Registered Route: ${data.delivery.deliveryChannel} (isRegisteredUser: true)`;
   });
 
   // 8. Update Contact Sharing Mode

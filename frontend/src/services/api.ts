@@ -70,10 +70,18 @@ export interface CreateSafeZonePayload {
   radiusMeters?: number;
 }
 
+export interface ContactDeliveryStatus {
+  isRegisteredUser: boolean;
+  deliveryChannel: 'PUSH_NOTIFICATION' | 'EMAIL_INVITATION' | 'MANUAL_SHARE' | 'NONE';
+  message?: string;
+  targetUserId?: string;
+}
+
 export interface ContactResponse {
   success: boolean;
   message?: string;
   data?: TrustedContact;
+  delivery?: ContactDeliveryStatus;
 }
 
 export interface GuardianshipWard {

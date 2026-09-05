@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Animated, Platform, Alert, Modal, View, Text, TouchableOpacity, Vibration } from 'react-native';
+import { Animated, Platform, Alert, Modal, View, Text, TouchableOpacity, Vibration, Share } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { io } from 'socket.io-client';
@@ -725,7 +725,11 @@ const MainApp = () => {
     setLoading(false);
 
     if (result.success && result.data) {
-      setContacts(prev => [result.data!, ...prev]);
+      const newContact = result.data;
+      const delivery = result.delivery;
+      const accessCode = newContact.accessCode;
+
+      setContacts(prev => [newContact, ...prev]);
       setCurrentScreen('DASHBOARD');
       setContactForm({
         contactName: '',
@@ -733,7 +737,53 @@ const MainApp = () => {
         contactEmail: '',
         relationship: 'Friend',
       });
-      triggerFeedback('Contact added to safety circle!', false);
+
+      const shareInvitation = async () => {
+        try {
+          const shareMsg = `🚨 SafeCircle Emergency Network 🚨\n\nI have added you (${contactName}) as my trusted emergency guardian on SafeCircle.\n\nYour 6-digit emergency tracking code: ${accessCode}\n\nIf I ever trigger an SOS or am in danger, you can view my live radar location and audio evidence here:\nhttps://safecircle.app/track?code=${accessCode}`;
+          await Share.share({
+            title: 'SafeCircle Guardian Code',
+            message: shareMsg,
+          });
+        } catch (e: any) {
+          console.warn('Share error:', e);
+        }
+      };
+
+      if (delivery?.isRegisteredUser) {
+        // Priority 1: Contact is an active SafeCircle member -> In-App Push Notification
+        Alert.alert(
+          '🛡️ Member Connected!',
+          `✅ ${contactName} is already a registered SafeCircle member!\n\nAn in-app notification has been dispatched to their device and they can see you under "People I Protect". No manual code entry is required.`,
+          [{ text: 'Great!' }]
+        );
+      } else if (delivery?.deliveryChannel === 'EMAIL_INVITATION') {
+        // Priority 2: Contact is not registered, but email was provided -> Email sent
+        Alert.alert(
+          '✉️ Invitation Dispatched!',
+          `An official SafeCircle email with 6-digit Access Code (${accessCode}) was sent to ${contactEmail.trim()}.\n\nWould you also like to share the code directly via WhatsApp or SMS?`,
+          [
+            { text: 'Done', style: 'cancel' },
+            {
+              text: '📲 Share via WhatsApp / SMS',
+              onPress: shareInvitation,
+            },
+          ]
+        );
+      } else {
+        // Priority 3: Contact is not registered, no email provided -> Direct Share
+        Alert.alert(
+          '🛡️ Guardian Code Generated',
+          `${contactName} is not yet on SafeCircle.\n\nTheir 6-digit Access Code is: ${accessCode}\n\nShare this code with them so they can track you during an emergency SOS.`,
+          [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: '📲 Share Code Now',
+              onPress: shareInvitation,
+            },
+          ]
+        );
+      }
     } else {
       triggerFeedback(result.message || 'Failed to add contact.');
     }

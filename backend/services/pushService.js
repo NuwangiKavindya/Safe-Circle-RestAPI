@@ -77,6 +77,60 @@ async function sendEmergencyPushNotification(targetTokens, alertPayload) {
   }
 }
 
+/**
+ * Send In-App Guardian Designation Push Notification via FCM
+ * @param {Array<string>} targetTokens Array of destination device FCM Tokens
+ * @param {Object} invitePayload Invitation metadata (ownerName, ownerPhone, wardId, relationship)
+ */
+async function sendGuardianInvitePushNotification(targetTokens, invitePayload) {
+  if (!targetTokens || !Array.isArray(targetTokens) || targetTokens.length === 0) {
+    console.log('[PushService] No FCM target tokens for guardian. Skipping push notification.');
+    return { success: false, reason: 'NO_TOKENS' };
+  }
+
+  const validTokens = targetTokens.filter(t => typeof t === 'string' && t.trim().length > 0);
+  if (validTokens.length === 0) return { success: false, reason: 'INVALID_TOKENS' };
+
+  const message = {
+    notification: {
+      title: `🛡️ New Guardian Designation`,
+      body: `${invitePayload.ownerName || 'A contact'} (${invitePayload.relationship || 'Contact'}) added you as their emergency guardian on SafeCircle.`,
+    },
+    data: {
+      wardId: String(invitePayload.wardId || ''),
+      ownerName: String(invitePayload.ownerName || ''),
+      ownerPhone: String(invitePayload.ownerPhone || ''),
+      screen: 'PEOPLE_I_PROTECT',
+    },
+    android: {
+      priority: 'high',
+      notification: {
+        channelId: 'safecircle_emergency_channel',
+        sound: 'default',
+        priority: 'high',
+        visibility: 'public',
+      },
+    },
+    tokens: validTokens,
+  };
+
+  if (isInitialized && getApps().length > 0) {
+    try {
+      const response = await getMessaging().sendEachForMulticast(message);
+      console.log(`[PushService] 🚀 Guardian invite push sent to ${response.successCount} / ${validTokens.length} devices.`);
+      return { success: true, response };
+    } catch (err) {
+      console.error('[PushService Error] Failed to send guardian invite push:', err);
+      return { success: false, error: err };
+    }
+  } else {
+    console.log(`[PushService Mock] 📱 Guardian Invite Push simulated for ${validTokens.length} devices: "${message.notification.title}"`);
+    return { success: true, simulated: true };
+  }
+}
+
 module.exports = {
   sendEmergencyPushNotification,
+  sendGuardianInvitePushNotification,
 };
+

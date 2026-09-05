@@ -2,9 +2,12 @@ const { Op } = require('sequelize');
 const TrustedContact = require('../models/TrustedContact');
 const User = require('../models/User');
 const Alert = require('../models/Alert');
+const Device = require('../models/Device');
+const pushService = require('../services/pushService');
+const emailService = require('../services/emailService');
 
 /**
- * @desc    Add a trusted contact
+ * @desc    Add a trusted contact with intelligent channel prioritization
  * @route   POST /api/contacts
  * @access  Private
  */
@@ -20,7 +23,7 @@ exports.addContact = async (req, res) => {
             });
         }
 
-        // Create contact (the beforeCreate hook automatically sets the unique 6-digit accessCode)
+        // 1. Create contact (the beforeCreate hook automatically sets the unique 6-digit accessCode)
         const contact = await TrustedContact.create({
             userId: req.user.id,
             contactName,
@@ -30,9 +33,79 @@ exports.addContact = async (req, res) => {
             isVerified: false
         });
 
+        // 2. Intelligent Channel Prioritization: Check if contact is an existing SafeCircle member
+        const cleanPhone = contactPhone.replace(/[\s\-\(\)]/g, '');
+        const phoneVariants = [cleanPhone];
+        if (cleanPhone.startsWith('+')) {
+            phoneVariants.push(cleanPhone.replace('+', ''));
+            if (cleanPhone.length > 10) {
+                phoneVariants.push(cleanPhone.slice(-10));
+            }
+        } else if (cleanPhone.length >= 10) {
+            phoneVariants.push('+' + cleanPhone);
+            phoneVariants.push(cleanPhone.slice(-10));
+        }
+
+        const whereConditions = [
+            { phoneNumber: { [Op.in]: phoneVariants } }
+        ];
+        if (contactEmail && contactEmail.trim()) {
+            whereConditions.push({ email: contactEmail.toLowerCase().trim() });
+        }
+
+        const registeredUser = await User.findOne({
+            where: { [Op.or]: whereConditions },
+            include: [{ model: Device, as: 'devices' }]
+        });
+
+        let delivery = {
+            isRegisteredUser: false,
+            deliveryChannel: 'NONE',
+            message: ''
+        };
+
+        if (registeredUser) {
+            // Priority 1: In-App Push Notification (Contact already has SafeCircle)
+            delivery.isRegisteredUser = true;
+            delivery.deliveryChannel = 'PUSH_NOTIFICATION';
+            delivery.message = `${registeredUser.fullName || contactName} is already on SafeCircle. In-app notification sent.`;
+            delivery.targetUserId = registeredUser.id;
+
+            const fcmTokens = (registeredUser.devices || [])
+                .map(d => d.fcmToken)
+                .filter(t => t && t.trim().length > 0);
+
+            await pushService.sendGuardianInvitePushNotification(fcmTokens, {
+                ownerName: req.user.fullName || 'SafeCircle User',
+                ownerPhone: req.user.phoneNumber,
+                wardId: req.user.id,
+                relationship: relationship || 'Guardian'
+            });
+        } else if (contactEmail && contactEmail.trim()) {
+            // Priority 2: Automated Email Invitation (New / Unregistered user with email)
+            delivery.isRegisteredUser = false;
+            delivery.deliveryChannel = 'EMAIL_INVITATION';
+            delivery.message = `Invitation email with access code dispatched to ${contactEmail.trim()}.`;
+
+            await emailService.sendGuardianInvitationEmail({
+                recipientEmail: contactEmail.trim(),
+                recipientName: contactName,
+                senderName: req.user.fullName || 'SafeCircle User',
+                senderPhone: req.user.phoneNumber,
+                accessCode: contact.accessCode,
+                relationship: relationship || 'Guardian'
+            });
+        } else {
+            // Priority 3: Native Share Sheet (New / Unregistered user without email)
+            delivery.isRegisteredUser = false;
+            delivery.deliveryChannel = 'MANUAL_SHARE';
+            delivery.message = `${contactName} is not on SafeCircle. Share access code via WhatsApp or SMS.`;
+        }
+
         res.status(201).json({
             success: true,
-            data: contact
+            data: contact,
+            delivery
         });
     } catch (error) {
         res.status(500).json({
@@ -41,6 +114,7 @@ exports.addContact = async (req, res) => {
         });
     }
 };
+
 
 /**
  * @desc    Get all trusted contacts for logged in user
